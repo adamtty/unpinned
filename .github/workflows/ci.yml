@@ -17,7 +17,7 @@ concurrency:
 
 env:
   # renovate: datasource=pypi depName=uv
-  UV_VERSION: 0.13.4
+  UV_VERSION: 0.13.5
   # renovate: datasource=pypi depName=zizmor
   ZIZMOR_VERSION: 1.31.1
   # renovate: datasource=pypi depName=pip-audit
@@ -88,7 +88,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: "3.15"
 
@@ -136,7 +136,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ matrix.python }}
 
@@ -175,7 +175,7 @@ jobs:
 
       # Atheris only ships Linux x86-64 wheels, for CPython 3.12-3.14 (3.1.0 has none for 3.15). The
       # version is an expression so Renovate leaves it alone: raise it when an Atheris release adds wheels.
-      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7.1.0
         with:
           python-version: ${{ env.ATHERIS_PYTHON }}
 
