@@ -498,3 +498,37 @@ def test_protected_apps_get_plain_advice(capsys):
     cli.show_report(r)
     out = capsys.readouterr().out
     assert "Protected by Talsec freeRASP" in out and "unpinned phone" in out and "allowlisted" in out
+
+
+def test_foreground_and_log_reasons(monkeypatch):
+    from unpinned import watch
+
+    acts = "  topResumedActivity=ActivityRecord{114481805 u0 com.google.android.apps.nexuslauncher/.Launcher t2}"
+    monkeypatch.setattr(device, "shell", lambda s, c, **k: acts)
+    assert not watch.in_front("emulator-5554", "com.app.damnvulnerablebank")
+    acts = "  topResumedActivity=ActivityRecord{12279577 u0 com.app.damnvulnerablebank/.MainActivity t9}"
+    assert watch.in_front("emulator-5554", "com.app.damnvulnerablebank")
+
+    log = (
+        "D/FRIDA CHECK( 3719): FRIDA Server NOT RUNNING\n"
+        "D/ViewRootImpl( 3719): Skipping stats log for color mode\n"
+        "D/FRIDA CHECK( 3719): FRIDA Server DETECTED\n"
+    )
+    monkeypatch.setattr(device, "shell", lambda s, c, **k: log)
+    assert watch.log_reason("emulator-5554", "3719") == "FRIDA Server DETECTED"
+    assert watch.log_reason("emulator-5554", "") == ""
+
+
+def test_crash_cause_is_the_exception_that_ended_the_app():
+    from unpinned import watch
+
+    block = """
+E AndroidRuntime: Process: com.x, PID: 4276
+E AndroidRuntime: java.lang.IllegalStateException: threat detected
+E AndroidRuntime: 	at app.talsec.rasp.e6.a(Unknown Source:78)
+E AndroidRuntime: 	... android.content.pm.PackageManager$NameNotFoundException: Superuser.apk
+"""
+    assert watch.crash_cause(block) == "java.lang.IllegalStateException: threat detected"
+    assert watch.crash_cause(block + "E AndroidRuntime: Caused by: java.lang.SecurityException: nope\n") == (
+        "java.lang.SecurityException: nope"
+    )

@@ -12,6 +12,7 @@ from pathlib import Path
 
 from unpinned import analyze, apk, assets, certs, device, env, hooks, intercept, patch, phone, static, watch
 
+WATCH_DEFAULT, WATCH_PROTECTED = 20.0, 60.0
 STRATEGIES = {
     "hooks": "root + Frida hooks: unpinning, root-detection bypass, proxy redirect (the app is untouched)",
     "ca": "system CA only, no Frida (enough when nothing is pinned; nothing for the app to detect)",
@@ -471,7 +472,7 @@ def _run_and_watch(
         outcome = watch.watch(serial, package, seconds=a.watch)
         if outcome.ok:
             return strategy
-        warn(f"the app refused to run ({'still open, showing' if outcome.alive else 'it closed'}: {outcome.reason})")
+        warn(f"the app refused to run: {outcome.reason}")
         options = [(k, STRATEGIES[k]) for k in ("gadget", "apk-mitm") if k not in tried]
         if not options:
             warn("every strategy has been tried: this one needs an app-specific hook (jadx, then --script)")
@@ -547,6 +548,8 @@ def cmd_run(a) -> int:
     r = analyze.analyze(apks)
     package = r.triage.package
     show_report(r)
+    if r.of("protector") and a.watch == WATCH_DEFAULT:
+        a.watch = WATCH_PROTECTED  # protectors (freeRASP) act after their background checks, ~20 s in
     if auto := _pin_check_hooks(a, r, run_dir):
         a.script = [*(a.script or []), str(auto)]
 
@@ -624,6 +627,8 @@ def cmd_phone(a) -> int:
     say(f"saved {original}")
     r = analyze.analyze(apk.load(original, run_dir / "apks"))
     show_report(r)
+    if r.of("protector") and a.watch == WATCH_DEFAULT:
+        a.watch = WATCH_PROTECTED  # protectors (freeRASP) act after their background checks, ~20 s in
     if auto := _pin_check_hooks(a, r, run_dir):
         a.script = [*(a.script or []), str(auto)]
 
@@ -750,7 +755,12 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--device", help="the phone's adb serial (default: the only phone connected)")
     r.add_argument("--strategy", choices=["auto", *STRATEGIES], default="auto", help="skip the question")
     r.add_argument("--yes", action="store_true", help="take every recommended answer without asking")
-    r.add_argument("--watch", type=float, default=20, help="seconds to watch for a refusal after launch (default 20)")
+    r.add_argument(
+        "--watch",
+        type=float,
+        default=WATCH_DEFAULT,
+        help="seconds to watch for a refusal after launch (default 20; 60 when triage finds a protector)",
+    )
     r.add_argument("--proxy", metavar="HOST:PORT", help="your own proxy (Burp, HTTP Toolkit, …) instead of mitmweb")
     r.add_argument("--ca", help="your proxy's CA certificate, PEM or DER (stored in certs/; asked for if omitted)")
     r.add_argument("--script", action="append", help="extra Frida script to load after the hooks (repeatable)")
@@ -778,7 +788,12 @@ def build_parser() -> argparse.ArgumentParser:
     ph.add_argument("--device", help="the phone's adb serial (default: the only phone connected)")
     ph.add_argument("--strategy", choices=["auto", *STRATEGIES], default="auto", help="skip the question")
     ph.add_argument("--yes", action="store_true", help="take every recommended answer without asking")
-    ph.add_argument("--watch", type=float, default=20, help="seconds to watch for a refusal after launch")
+    ph.add_argument(
+        "--watch",
+        type=float,
+        default=WATCH_DEFAULT,
+        help="seconds to watch for a refusal after launch (default 20; 60 when triage finds a protector)",
+    )
     ph.add_argument("--proxy", metavar="HOST:PORT", help="your own proxy instead of mitmweb")
     ph.add_argument("--ca", help="your proxy's CA certificate, PEM or DER")
     ph.add_argument("--script", action="append", help="extra Frida script to load after the hooks")

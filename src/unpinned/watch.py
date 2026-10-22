@@ -51,24 +51,67 @@ def exit_reason(serial: str, package: str) -> str:
     crash = device.shell(serial, "logcat -d -b crash -t 200", check=False, timeout=30)
     blocks = [b for b in crash.split("FATAL EXCEPTION") if f"Process: {package}" in b]
     if blocks:
-        m = re.search(r"\n[^\n]*?([\w.$]+(?:Exception|Error)[^\n]*)", blocks[-1])
-        if m:
-            parts.append(m.group(1).strip()[:200])
+        cause = crash_cause(blocks[-1])
+        if cause:
+            parts.append(cause)
     return ": ".join(parts)
+
+
+def crash_cause(block: str) -> str:
+    """The exception that ended the app: the last "Caused by:" if there is one, else the thrown exception (the first
+    exception line after "Process:"), not whatever exception text appears first in the block."""
+    lines = [re.sub(r"^.*?\b(?:AndroidRuntime|DEBUG)\s*:\s?", "", ln).strip() for ln in block.splitlines()]
+    caused = [ln.removeprefix("Caused by: ") for ln in lines if ln.startswith("Caused by:")]
+    if caused:
+        return caused[-1][:200]
+    after = False
+    for ln in lines:
+        if ln.startswith("Process:"):
+            after = True
+            continue
+        if after and re.match(r"^[\w.$]+(?:Exception|Error)\b", ln):
+            return ln[:200]
+    return ""
+
+
+def in_front(serial: str, package: str) -> bool:
+    """Is one of the app's activities the resumed (foreground) one?"""
+    out = device.shell(serial, "dumpsys activity activities", check=False, timeout=30)
+    m = re.search(r"(?:topResumedActivity|ResumedActivity)[:=]\s*ActivityRecord\{\S+ \S+ ([\w.]+)/", out)
+    return bool(m) and m.group(1) == package
+
+
+def log_reason(serial: str, pid: str) -> str:
+    """The app's own last log line that sounds like a refusal ("FRIDA Server DETECTED", "Root detected!", …)."""
+    if not pid:
+        return ""
+    out = device.shell(serial, f"logcat -d --pid={pid} -v brief", check=False, timeout=30)
+    hits = [ln.split(": ", 1)[-1].strip() for ln in out.splitlines() if REFUSAL_RE.search(ln.split(": ", 1)[-1])]
+    hits = [h for h in hits if "NOT" not in h.upper().split()]  # "FRIDA Server NOT RUNNING" is the app saying it's fine
+    return hits[-1][:200] if hits else ""
 
 
 def watch(serial: str, package: str, seconds: float = 20, look_at: float = 8) -> Outcome:
     start = time.monotonic()
-    seen, looked = False, False
+    seen, looked, pid = False, False, ""
     while time.monotonic() - start < seconds:
-        alive = bool(device.shell(serial, f"pidof {package}", check=False, timeout=10).strip())
+        pids = device.shell(serial, f"pidof {package}", check=False, timeout=10).split()
+        alive = bool(pids)
+        pid = pids[0] if pids else pid
         seen |= alive
         if not alive and (seen or time.monotonic() - start > 12):
-            return Outcome(False, exit_reason(serial, package) if seen else "it never started", refused=True)
+            why = f"it exited ({exit_reason(serial, package)})" if seen else "it never started"
+            said = log_reason(serial, pid)
+            return Outcome(False, f"{why}; the app logged: {said}" if said else why, refused=True)
         if alive and not looked and time.monotonic() - start >= look_at:
             looked = True
             hits = [t for t in screen_text(serial, package) if REFUSAL_RE.search(t)]
             if hits:
-                return Outcome(True, " / ".join(hits)[:300], refused=True)
+                return Outcome(True, "it's showing: " + " / ".join(hits)[:300], refused=True)
+            if not in_front(serial, package):  # closed its own window but kept the process (DVBA's Frida check)
+                said = log_reason(serial, pid)
+                return Outcome(
+                    True, "it closed its window" + (f"; the app logged: {said}" if said else ""), refused=True
+                )
         time.sleep(1)
     return Outcome(True)

@@ -1,0 +1,31 @@
+source:
+	/private/var/folders/94/l29xzwx11w32cg9sn14jkb_w0000gn/T/apk-mitm-bda880edc9d670d0307cb4c8382a84ad
+zipalign location: BUILT_IN 
+	/var/folders/94/l29xzwx11w32cg9sn14jkb_w0000gn/T/uapksigner-6155113731455814357/mac-zipalign-33_0_29108845975058474688.tmp
+keystore:
+	[0] 161a0018 /private/var/folders/94/l29xzwx11w32cg9sn14jkb_w0000gn/T/temp_4900177592874334792_debug.keystore (DEBUG_EMBEDDED)
+
+01. tmp.apk
+
+	SIGN
+	file: /private/var/folders/94/l29xzwx11w32cg9sn14jkb_w0000gn/T/apk-mitm-bda880edc9d670d0307cb4c8382a84ad/tmp.apk (3.61 MiB)
+	checksum: 52ee2d86e550746743e76e04b2820ad4c0c177f38fac5d93a26c08f12816fb92 (sha256)
+	- zipalign success
+WARNING: A restricted method in java.lang.System has been called
+WARNING: java.lang.System::loadLibrary has been called by org.conscrypt.NativeLibraryUtil in an unnamed module (file:/Users/adam/Library/Caches/apk-mitm/uber-apk-signer-v1.3.0.jar)
+WARNING: Use --enable-native-access=ALL-UNNAMED to avoid a warning for callers in this module
+WARNING: Restricted methods will be blocked in a future release unless native access is enabled
+
+	- sign success
+
+	VERIFY
+	file: /private/var/folders/94/l29xzwx11w32cg9sn14jkb_w0000gn/T/apk-mitm-bda880edc9d670d0307cb4c8382a84ad/tmp.apk (3.68 MiB)
+	checksum: b13c9b2516b70a845e5e2be1c75ab920b8178ca3c102d5694a68d8b8dc66ee95 (sha256)
+	- zipalign verified
+	- signature verified [v1, v2, v3]
+		Subject: CN=Android Debug, OU=Android, O=US, L=US, ST=US, C=US
+		SHA256: 1e08a903aef9c3a721510b64ec764d01d3d094eb954161b62544ea8f187b5953 / SHA256withRSA
+		Expires: Thu Mar 10 20:10:05 GMT 2044
+
+[Thu Oct 22 23:35:06 BST 2026][v1.3.0]
+Successfully processed 1 APKs and 0 errors in 0.26 seconds.
