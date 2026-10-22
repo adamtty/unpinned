@@ -72,6 +72,9 @@ unpinned run app.apk        # triage → choose → reset → install → unpin 
 | `unpinned setup` | Download and verify frida-server and the hooks, create the emulator, root it, save the clean snapshot. |
 | `unpinned triage APP` | The static report and a suggested method, with no emulator. |
 | `unpinned run APP` | The whole flow, interactively. |
+| `unpinned pull APP` | Pull an app installed on your phone (every split) into one `.apks`. `APP` is a package name or part of one to search for. |
+| `unpinned run --from-phone APP` | Pull it off your phone, then the whole emulator flow. |
+| `unpinned phone APP` | The same flow **on your rooted phone** (see [your phone](#your-phone)). |
 | `unpinned patch APP` | Write a patched APK (`--method gadget` or `apk-mitm`) without running it, e.g. for a real device. |
 | `unpinned reset` | Put the running emulator back to its clean snapshot. |
 | `unpinned stop` | Stop the emulator (discarding its changes), the hooks, mitmweb and scrcpy. |
@@ -98,6 +101,34 @@ give its CA certificate, PEM or DER: Burp's `cacert.der` export works as it is.
   reached directly from the emulator.
 
 Without the questions: `unpinned run app.apk --proxy 127.0.0.1:8080 --ca ~/Downloads/cacert.der`.
+
+### Your phone
+
+Plug in a rooted phone (Magisk or KernelSU) with USB debugging on, and grant the shell root once. Then:
+
+```bash
+unpinned run --from-phone spotify   # pull it off the phone, run it in the emulator
+unpinned phone spotify              # or do it on the phone itself
+```
+
+- **The app keeps its data.** On the phone, frida-server, the proxy's CA and the proxy go on through `su`, and the app
+  isn't reinstalled. A copy of the app is pulled first anyway, for triage and as a backup.
+- **Patching is asked first.** If the app still refuses to run, patching it means reinstalling it, which wipes its
+  data, so `phone` asks before doing it. The original goes back with `unpinned phone --restore <the pulled .apks>`.
+- **Traffic reaches your Mac** through `adb reverse` over the USB cable, or goes straight to your own proxy on the
+  network.
+- **Cleanup:** `unpinned phone --cleanup` stops frida-server, unmounts the CA and clears the proxy setting. A reboot
+  does too.
+- **It leaves your own setup alone.**
+  - unpinned's frida-server has its own filename, so a frida-server you keep on the phone isn't overwritten.
+  - The CA mount is labelled, and cleanup only removes those, so Magisk modules that mount over the same CA
+    folder are left untouched.
+- **Older phones:** current frida-server crashes on some older devices (Samsung on Android 9, for one:
+  [frida#3715](https://github.com/frida/frida/issues/3715)). unpinned notices and uses frida-server 17.5.2 instead,
+  verified the same way, and remembers that for the phone.
+
+Tested on a Galaxy Note 8 (Android 9, Magisk 26.4) with the pinning demo: every request, including Flutter, HTTP/3,
+TrustKit and the Certificate Transparency checks, decrypted on the phone without reinstalling the app.
 
 ## Install
 
@@ -195,9 +226,6 @@ unpinned is MIT.
 
 ## Roadmap
 
-- **Real rooted devices:** point unpinned at an app already installed on a rooted phone. It pulls a copy (every
-  split) off the device, triages and patches it, installs the fixed build back, and sets up the proxy and CA on the
-  device.
 - A container fleet: Redroid on an ARM server, with Tailscale for access.
 - The gadget on Android 16, once Frida's GC fix lands; broader tests of the refuse → patch → reopen loop.
 - Flutter pattern updates, and reFlutter as a fallback.

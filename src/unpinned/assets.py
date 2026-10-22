@@ -137,3 +137,8 @@ def render_config(template: str, ca_pem: str, host: str, port: int) -> str:
     if (n1, n2, n3) != (1, 1, 1):
         raise AssetError("config.js doesn't have the expected CERT_PEM / PROXY_HOST / PROXY_PORT lines")
     return out
+
+
+def frida_server_fallback() -> Path:
+    """frida-server 17.5.2, for devices that current builds crash on; downloaded and verified when first needed."""
+    return ensure_frida_server("17.5.2")

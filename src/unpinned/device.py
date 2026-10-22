@@ -4,14 +4,16 @@ starts from, rooted adbd, frida-server, and app installs."""
 from __future__ import annotations
 
 import re
+import shlex
 import subprocess
 import time
+from collections.abc import Callable
 from pathlib import Path
 
 from unpinned import env
 
 BOOT_TIMEOUT = 300
-DEVICE_SERVER = "/data/local/tmp/frida-server"
+DEVICE_SERVER = "/data/local/tmp/unpinned-frida-server"  # its own name: never overwrite a frida-server you keep there
 
 
 class DeviceError(RuntimeError):
@@ -159,7 +161,27 @@ def settle(serial: str, timeout: float = 120) -> None:
         time.sleep(2)
 
 
+_SU: set[str] = set()  # real devices rooted with Magisk / KernelSU: root commands go through `su`
+
+
+def mark_su(serial: str) -> None:
+    _SU.add(serial)
+
+
+def rootsh(serial: str, command: str, timeout: float = 60, check: bool = True) -> str:
+    """Run a shell command as root: through `su -mm` (Magisk's global mount namespace, so mounts reach apps) on a
+    rooted phone, or with adbd already root on the emulator."""
+    if serial in _SU:
+        return shell(serial, "su -mm -c " + shlex.quote(command), timeout=timeout, check=check)
+    root(serial)
+    return shell(serial, command, timeout=timeout, check=check)
+
+
 def root(serial: str) -> None:
+    if serial in _SU:
+        if shell(serial, "su -c 'id -u'", check=False, timeout=30).strip() != "0":
+            raise DeviceError("`su` didn't give root: grant the shell root in Magisk / KernelSU and try again")
+        return
     if shell(serial, "id -u", check=False).strip() == "0":
         return
     adb("root", serial=serial, check=False)
@@ -232,28 +254,62 @@ def reset(serial: str) -> None:
     wait_booted(serial)
 
 
-def start_frida_server(serial: str, frida_server: Path) -> None:
-    """(Re)start frida-server as root. Pushes it again if the snapshot predates this frida version."""
-    root(serial)
-    want = frida_server.stat().st_size
-    have = shell(serial, f"stat -c %s {DEVICE_SERVER} 2>/dev/null", check=False).strip()
+# frida-server 17.6+ segfaults at start-up on some older devices (Samsung, Android 9 / kernel 4.4); 17.5.2 runs there
+# and the pinned client talks to it fine. https://github.com/frida/frida/issues/3715
+FALLBACK_SERVER = "17.5.2"
+FRIDA_OLD_DEVICE_BUG = "https://github.com/frida/frida/issues/3715"
+
+
+def frida_listening(serial: str) -> bool:
+    """Is frida-server listening on 27042 (0x69A2)? Frida's own client can't tell: without a server it falls back
+    to adb and still lists processes."""
+    return listening_on(rootsh(serial, "cat /proc/net/tcp /proc/net/tcp6 2>/dev/null", check=False, timeout=15), 27042)
+
+
+def listening_on(proc_net_tcp: str, port: int) -> bool:
+    """Is anything in LISTEN (state 0A) on this local port, per /proc/net/tcp{,6} text?"""
+    want = f":{port:04X}"
+    for ln in proc_net_tcp.splitlines():
+        f = ln.split()
+        if len(f) > 3 and f[1].endswith(want) and f[3] == "0A":
+            return True
+    return False
+
+
+def _run_server(serial: str, binary: Path) -> bool:
+    want = binary.stat().st_size
+    have = rootsh(serial, f"stat -c %s {DEVICE_SERVER} 2>/dev/null", check=False).strip()
     if have != str(want):
-        adb("push", str(frida_server), DEVICE_SERVER, serial=serial, timeout=180)
-        shell(serial, f"chmod 755 {DEVICE_SERVER}")
-    shell(serial, "pkill -f frida-server", check=False)
+        adb("push", str(binary), "/data/local/tmp/frida-server.new", serial=serial, timeout=180)
+        rootsh(serial, f"mv /data/local/tmp/frida-server.new {DEVICE_SERVER} && chmod 755 {DEVICE_SERVER}")
+    rootsh(serial, "pkill -f frida-server", check=False)
     # -D daemonises, but adb shell waits while anything holds its stdout, so detach every stream
-    shell(serial, f"{DEVICE_SERVER} -D </dev/null >/dev/null 2>&1", check=False, timeout=20)
-
-    import frida
-
-    deadline = time.monotonic() + 30
+    rootsh(serial, f"{DEVICE_SERVER} -D </dev/null >/dev/null 2>&1", check=False, timeout=20)
+    deadline = time.monotonic() + 10
     while time.monotonic() < deadline:
-        try:
-            frida.get_device(serial, timeout=5).enumerate_processes()
-            return
-        except (frida.InvalidArgumentError, frida.ServerNotRunningError, frida.TransportError, frida.TimedOutError):
-            time.sleep(1)
-    raise DeviceError("frida-server didn't come up on the device")
+        if frida_listening(serial):
+            time.sleep(3)  # the broken builds listen for about a second before they crash: must still be up
+            return frida_listening(serial)
+        time.sleep(1)
+    return False
+
+
+def start_frida_server(serial: str, frida_server: Path, fallback: Callable[[], Path] | None = None) -> str:
+    """(Re)start frida-server as root, falling back to an older build the device can run. → the version used."""
+    from unpinned import intercept
+
+    known = intercept.state().get("frida_server_for", {}).get(serial)
+    order = [(fallback, FALLBACK_SERVER)] if known == FALLBACK_SERVER and fallback else []
+    order += [(frida_server, None), (fallback, FALLBACK_SERVER)]
+    for binary, version in order:
+        if binary is None:
+            continue
+        if _run_server(serial, binary() if callable(binary) else binary):
+            if version:
+                remembered = intercept.state().get("frida_server_for", {}) | {serial: version}
+                intercept.save_state(frida_server_for=remembered)
+            return version or "pinned"
+    raise DeviceError(f"frida-server won't start on this device (see {FRIDA_OLD_DEVICE_BUG})")
 
 
 # Android 14+ reads system CAs from the Conscrypt APEX (read-only, per mount namespace); older versions and Flutter's
@@ -267,7 +323,7 @@ TMP=/data/local/tmp/unpinned-cacerts
 rm -rf "$TMP"; mkdir -p "$TMP"
 if [ -d "$APEX" ]; then cp "$APEX"/* "$TMP"/; else cp "$SYS"/* "$TMP"/; fi
 cp /data/local/tmp/unpinned-ca.0 "$TMP/{name}"
-mount -t tmpfs tmpfs "$SYS"
+mount -t tmpfs unpinned "$SYS"  # "unpinned" as the source: cleanup only ever unmounts these
 cp "$TMP"/* "$SYS"/
 chown root:root "$SYS"/*; chmod 644 "$SYS"/*; chcon u:object_r:system_file:s0 "$SYS" "$SYS"/*
 if [ -d "$APEX" ]; then
@@ -296,13 +352,44 @@ def subject_hash_old(pem_path: Path) -> str:
 
 def install_system_ca(serial: str, pem_path: Path) -> None:
     """Make our CA a system CA for apps started from now on (until the next reset)."""
-    root(serial)
     name = f"{subject_hash_old(pem_path)}.0"
     adb("push", str(pem_path), "/data/local/tmp/unpinned-ca.0", serial=serial)
+    remove_system_ca(serial)  # never stack a second tmpfs on top of an earlier run's
     script = _SYSTEM_CA_SCRIPT.replace("{name}", name)
-    out = shell(serial, script, timeout=60, check=False)
+    out = rootsh(serial, script, timeout=60, check=False)
     if "unpinned-ca-ok" not in out:
         raise DeviceError(f"installing the system CA failed: {out.strip()[-300:]}")
+
+
+_REMOVE_CA_SCRIPT = r"""
+ours_on_top() { [ "$(grep " $1 " /proc/mounts | tail -1 | cut -d' ' -f1)" = unpinned ]; }
+for Z in $(pidof zygote zygote64); do
+  nsenter --mount=/proc/$Z/ns/mnt -- sh -c '
+    while [ "$(grep " /apex/com.android.conscrypt/cacerts " /proc/mounts | tail -1 | cut -d" " -f1)" = unpinned ]; do
+      umount /apex/com.android.conscrypt/cacerts || break
+    done'
+done
+for M in /apex/com.android.conscrypt/cacerts /system/etc/security/cacerts; do
+  while ours_on_top "$M"; do umount "$M" || break; done
+done
+true
+"""
+
+
+def remove_system_ca(serial: str) -> None:
+    """Undo install_system_ca: unmount our copies, and only ours (a Magisk module may mount over the same folder;
+    apps started afterwards see whatever was there before)."""
+    rootsh(serial, _REMOVE_CA_SCRIPT, check=False)
+
+
+def set_proxy(serial: str, host: str | None, port: int = 0) -> None:
+    """The device-wide HTTP proxy apps follow when nothing hooks them (None clears it)."""
+    value = f"{host}:{port}" if host else ":0"
+    shell(serial, f"settings put global http_proxy {shlex.quote(value)}", check=False)
+
+
+def remove_reverse(serial: str) -> None:
+    adb("reverse", "--remove-all", serial=serial, check=False)
 
 
 def install(serial: str, apks: list[Path]) -> None:
@@ -325,7 +412,7 @@ def uninstall(serial: str, package: str) -> None:
 
 
 def stop_frida_server(serial: str) -> None:
-    shell(serial, "pkill -f frida-server", check=False)
+    rootsh(serial, "pkill -f frida-server", check=False)
 
 
 def reverse(serial: str, port: int) -> None:
