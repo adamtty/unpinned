@@ -136,6 +136,11 @@ unpinned phone spotify              # or do it on the phone itself
   sockets), and nothing else on the device is touched. QUIC and IPv6 TCP are blocked for the app so it falls back to
   IPv4 TCP. `--global-proxy` uses the device-wide proxy setting instead. The rules live in their own `UNPINNED_*`
   chains, which cleanup removes, and nothing else.
+- **Root is hidden from the app** with Magisk's DenyList (`--no-hide-root` to skip): unpinned adds the app, and
+  cleanup takes it off again, only if unpinned added it. This needs Zygisk and "Enforce DenyList" on in Magisk
+  (`phone` tells you if they're off). The DenyList also hides the proxy's system-store CA from that app, so root is
+  hidden only for the hooks and the gadget, which trust the CA inside the app. The CA-only and apk-mitm methods
+  leave root visible rather than lose HTTPS.
 - **Cleanup:** `unpinned phone --cleanup` stops frida-server, unmounts the CA and clears the proxy setting. A reboot
   does too.
 - **It leaves your own setup alone.**

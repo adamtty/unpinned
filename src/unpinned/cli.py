@@ -461,12 +461,27 @@ def _patch(
 
 
 def _run_and_watch(
-    a, serial, package, strategy, apks, original, config, run_dir, server, proxy, *, api=None, confirm_reinstall=None
+    a,
+    serial,
+    package,
+    strategy,
+    apks,
+    original,
+    config,
+    run_dir,
+    server,
+    proxy,
+    *,
+    api=None,
+    confirm_reinstall=None,
+    before_launch=None,
 ) -> str | None:
     """Launch, watch for a refusal, and offer the next patch until the app runs. → the strategy that worked, or None
-    when the user stops (or nothing is left to try)."""
+    when the user stops (or nothing is left to try). before_launch(strategy) runs before each attempt."""
     tried = {strategy}
     while True:
+        if before_launch:
+            before_launch(strategy)
         _launch(a, serial, package, strategy, apks, config, run_dir, server, proxy)
         say(f"watching the app for {a.watch:.0f}s")
         outcome = watch.watch(serial, package, seconds=a.watch)
@@ -590,6 +605,8 @@ def cmd_run(a) -> int:
 
 
 def _phone_cleanup(serial: str) -> None:
+    for package in phone.unhide_root(serial):
+        say(f"took {package} off Magisk's DenyList (unpinned had added it)")
     device.stop_frida_server(serial)
     device.remove_transparent_proxy(serial)
     device.remove_system_ca(serial)
@@ -660,6 +677,18 @@ def cmd_phone(a) -> int:
     if not a.headless:
         intercept.start_scrcpy(serial, f"unpinned · {package}")
 
+    def root_hiding(strategy: str) -> None:
+        # Magisk's DenyList also strips the system-store CA from the app; the hooks and the gadget trust the CA
+        # inside the app, so only they can have root hidden without losing interception
+        if a.no_hide_root:
+            return
+        if strategy in ("hooks", "gadget"):
+            say(phone.hide_root(serial, package))
+        elif phone.unhide_root(serial):
+            say(f"{package} is off Magisk's DenyList again: hiding root would also hide the proxy's CA from it")
+        else:
+            say(f"root isn't hidden for the {strategy} method: Magisk's DenyList would also hide the proxy's CA")
+
     done = _run_and_watch(
         a,
         serial,
@@ -672,6 +701,7 @@ def cmd_phone(a) -> int:
         server,
         (host, port),
         confirm_reinstall=confirm_reinstall,
+        before_launch=root_hiding,
     )
     if not done:
         return 2
@@ -804,6 +834,9 @@ def build_parser() -> argparse.ArgumentParser:
         "--global-proxy",
         action="store_true",
         help="without Frida, use the device-wide proxy setting instead of redirecting just the app with iptables",
+    )
+    ph.add_argument(
+        "--no-hide-root", action="store_true", help="don't put the app on Magisk's DenyList (root stays visible to it)"
     )
     ph.add_argument("--cleanup", action="store_true", help="take frida-server, the CA and the proxy off the phone")
     ph.add_argument("--restore", metavar="BUNDLE", help="reinstall an original pulled before patching")

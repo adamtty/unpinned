@@ -6,6 +6,7 @@ from __future__ import annotations
 import re
 import time
 import zipfile
+from dataclasses import dataclass
 from pathlib import Path
 
 from unpinned import device, env
@@ -101,3 +102,62 @@ def pull(serial: str, package: str, dest_dir: Path | None = None) -> Path:
         (work / name).unlink()
     work.rmdir()
     return bundle
+
+
+# --- hiding root from the app under test --------------------------------------------------------------------------
+@dataclass
+class Magisk:
+    version: str
+    denylist_enforced: bool
+
+
+def magisk(serial: str) -> Magisk | None:
+    """Magisk's version and whether its DenyList is enforced (it needs Zygisk), or None without Magisk."""
+    version = device.rootsh(serial, "magisk -v 2>/dev/null", check=False).strip()
+    if not version or "MAGISK" not in version.upper():
+        return None
+    status = device.rootsh(serial, "magisk --denylist status 2>&1", check=False)
+    return Magisk(version, "is enforced" in status and "not enforced" not in status)
+
+
+def denylisted(serial: str, package: str) -> bool:
+    out = device.rootsh(serial, "magisk --denylist ls 2>&1", check=False)
+    return any(ln.split("|", 1)[0].strip() == package for ln in out.splitlines())
+
+
+def hide_root(serial: str, package: str) -> str:
+    """Put the app on Magisk's DenyList, so Magisk hides itself and undoes its changes inside that app. → what was
+    done, for the user. Remembers additions so cleanup only removes what unpinned added."""
+    from unpinned import intercept
+
+    m = magisk(serial)
+    if m is None:
+        return "no Magisk on this phone: root isn't hidden (KernelSU and others have their own per-app settings)"
+    if not m.denylist_enforced:
+        return (
+            "Magisk's DenyList isn't enforced, so root isn't hidden. To turn it on: Magisk app → Settings → "
+            "Zygisk on, Enforce DenyList on, then reboot"
+        )
+    if denylisted(serial, package):
+        return f"{package} is already on Magisk's DenyList"
+    device.rootsh(serial, f"magisk --denylist add {package}")
+    added = intercept.state().get("denylist_added", {})
+    added.setdefault(serial, [])
+    if package not in added[serial]:
+        added[serial].append(package)
+    intercept.save_state(denylist_added=added)
+    return f"added {package} to Magisk's DenyList: Magisk hides itself from it"
+
+
+def unhide_root(serial: str) -> list[str]:
+    """Take off the DenyList what unpinned put there (and nothing else)."""
+    from unpinned import intercept
+
+    added = intercept.state().get("denylist_added", {})
+    removed = []
+    for package in added.pop(serial, []):
+        if device.is_package(package):
+            device.rootsh(serial, f"magisk --denylist rm {package}", check=False)
+            removed.append(package)
+    intercept.save_state(denylist_added=added)
+    return removed
