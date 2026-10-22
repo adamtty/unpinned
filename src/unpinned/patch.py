@@ -357,7 +357,7 @@ def apk_mitm(app: Path, workdir: Path) -> list[Path]:
     workdir.mkdir(parents=True, exist_ok=True)
     src = workdir / app.name
     shutil.copyfile(app, src)
-    _run([tool, str(src)], timeout=1800)
+    _run([tool, str(src)], timeout=1800, cwd=workdir)  # it writes a logs/ folder wherever it runs
     patched = src.with_name(src.stem + "-patched" + src.suffix)
     if not patched.is_file():
         raise PatchError("apk-mitm didn't produce a -patched file")
