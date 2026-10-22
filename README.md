@@ -209,6 +209,11 @@ Triage on the same app reports every one of those techniques, including the raw 
 - **Root is mostly invisible:** the emulator is rooted through `adbd`, and SELinux hides `su` from apps, so many
   simple root checks never fire. Good for testing; but it means the refuse → patch → reopen path is hard to show
   with demo apps.
+- **Apps behind runtime protection (RASP)**, such as freeRASP, Promon, DexGuard or Appdome, are built to spot
+  emulators, root and instrumentation, and they win on an emulator. Triage says so when it finds one. A real phone
+  with root hidden gets further (the freeRASP demo kept running under the gadget on a Note 8). On an authorised
+  test, ask for a build with the protection in development or report-only mode, or with your device allowlisted.
+  Most apps aren't protected like this.
 - **Play Integrity / SafetyNet** are judged on Google's servers. An emulator fails device integrity whatever runs on
   it, so flows gated on them won't work here.
 - **Localhost only:** mitmweb listens on 127.0.0.1, behind a random web password kept in a private config file. The
