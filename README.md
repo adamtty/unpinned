@@ -38,6 +38,11 @@ unpinned run app.apk        # triage → choose → reset → install → unpin 
    | Root, Frida, emulator and debugger checks | RootBeer, `su` paths, Magisk, Frida strings in DEX or native code, emulator properties |
    | Attestation and protectors | Play Integrity, SafetyNet, freeRASP, Promon, Jiagu, Bangcle, Legu, Appdome, DexProtector |
 
+   It also finds **the app's own certificate checks**: its methods that take a certificate or TLS session and return
+   a boolean (a hand-written pin check), and `checkServerTrusted` on its own TrustManagers. `run` and `phone` offer
+   to hook those to pass, logging every call they override (`--no-auto-hooks` to skip). Methods that only take a
+   public key are left alone: those verify signatures, like license or purchase receipts, not certificates.
+
    Known third-party libraries (Cronet, Flutter's engine, crash reporters…) are skipped, so their strings don't
    count against the app.
 
@@ -167,7 +172,7 @@ Android 14, where it's stable ([why](#known-issues)):
 | Certificate Transparency (Android, Appmattus, Appmattus + OkHttp, Appmattus + raw TLS) | ✅ | ✅ |
 | Flutter (via the system CA) | ✅ | ✅ |
 | HTTP/3 (Cronet) | ✅ | ✅ |
-| Raw custom pinning (the app hashes the key itself) | ❌ needs an app-specific hook | ❌ |
+| Raw custom pinning (the app hashes the key itself) | ✅ auto-hooked | ✅ auto-hooked |
 
 Triage on the same app reports every one of those techniques, including the raw custom `TrustManager` by class name.
 
@@ -183,8 +188,6 @@ Triage on the same app reports every one of those techniques, including the raw 
   - **On Android 16 it's flaky, not hopeless.** `setup` switches unpinned's emulator to ART's concurrent-copying
     collector, which helps (5 of 7 runs survive, against 0 of 4 on the default collector) but doesn't fix it.
   - The frida-server route (root + hooks) isn't affected.
-- **Plain HTTP that ignores the proxy** (`Proxy.NO_PROXY`) isn't caught by the gadget on Android 14. It's plain
-  HTTP, so there's no pinning to bypass.
 - **Emulator updates break the snapshot.** Snapshots are tied to the emulator version, so after the Android SDK
   updates the emulator, `run` asks you to run `unpinned setup` again.
 - **Without `--insecure-upstream`,** a pinned request to a server the proxy can't verify can make HTTP Toolkit's
@@ -194,11 +197,6 @@ Triage on the same app reports every one of those techniques, including the raw 
   with demo apps.
 - **Play Integrity / SafetyNet** are judged on Google's servers. An emulator fails device integrity whatever runs on
   it, so flows gated on them won't work here.
-- **Raw custom pinning** (an app hashing keys in its own code) needs a hook written for that app: triage names the
-  class, then pass your hook with `--script`.
-
-## Security
-
 - **Localhost only:** mitmweb listens on 127.0.0.1, behind a random web password kept in a private config file. The
   device reaches it through `adb reverse`.
 - **Separate from your own setup:** a dedicated emulator, never your own ones. Its own mitmproxy CA under

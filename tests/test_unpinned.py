@@ -350,3 +350,34 @@ def test_remove_ca_only_touches_unpinned_mounts():
         and "umount /system/etc/security/cacerts\n" not in device._REMOVE_CA_SCRIPT
     )
     assert 'mount -t tmpfs unpinned "$SYS"' in device._SYSTEM_CA_SCRIPT
+
+
+# --- auto-hooks for the app's own certificate checks ----------------------------------------------------------
+from unpinned import hooks  # noqa: E402
+
+CERT = "Ljava/security/cert/Certificate;"
+
+
+def test_pin_check_candidates():
+    methods = [
+        ("Lx/App;", "doesCertMatchPin", ["Ljava/lang/String;", CERT], "Z"),
+        ("Lx/App;", "access$doesCertMatchPin", ["Lx/App;", "Ljava/lang/String;", CERT], "Z"),  # compiler bridge
+        ("Lx/App;", "verifyReceipt", ["Ljava/lang/String;", "Ljava/security/PublicKey;"], "Z"),  # signature check
+        ("Lx/App;", "render", [CERT], "V"),  # not boolean
+        ("Lokhttp3/X;", "check", [CERT], "Z"),  # library, not in app_classes
+        ("Lx/Tm;", "checkServerTrusted", ["[Ljava/security/cert/X509Certificate;", "Ljava/lang/String;"], "V"),
+    ]
+    got = hooks.candidates(methods, {"Lx/App;", "Lx/Tm;"}, {"Lx/Tm;"})
+    assert [(c.cls, c.method) for c in got] == [("x.App", "doesCertMatchPin"), ("x.Tm", "checkServerTrusted")]
+    assert got[1].params == ("[Ljava.security.cert.X509Certificate;", "java.lang.String")
+    assert got[1].label() == "x.Tm.checkServerTrusted(X509Certificate[], String) → void"
+
+
+def test_frida_types():
+    assert hooks.frida_type("I") == "int" and hooks.frida_type("[B") == "[B"
+    assert hooks.frida_type("Lx/y/Z$1;") == "x.y.Z$1"
+
+
+def test_pin_check_script_carries_its_targets_as_data():
+    s = hooks.script([hooks.PinCheck("x.App", "check", ("java.lang.String",), "boolean")])
+    assert '[["x.App", "check", ["java.lang.String"], "boolean"]]' in s and "callApplicationOnCreate" in s

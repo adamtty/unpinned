@@ -17,6 +17,8 @@ class DexError(ValueError):
 class Dex:
     strings: list[str] = field(default_factory=list)
     classes: list[tuple[str, str, list[str]]] = field(default_factory=list)  # (class, superclass, interfaces)
+    # (declaring class, name, parameter types, return type) for every method this dex names
+    methods: list[tuple[str, str, list[str], str]] = field(default_factory=list)
 
 
 def _uleb128(data: bytes, off: int) -> tuple[int, int]:
@@ -52,7 +54,15 @@ def _parse(data: bytes, max_strings: int) -> Dex:
     string_ids_size, string_ids_off = _u32(data, 0x38), _u32(data, 0x3C)
     type_ids_size, type_ids_off = _u32(data, 0x40), _u32(data, 0x44)
     class_defs_size, class_defs_off = _u32(data, 0x60), _u32(data, 0x64)
-    if string_ids_size > max_strings or type_ids_size > 65536 or class_defs_size > 65536:
+    proto_ids_size, proto_ids_off = _u32(data, 0x48), _u32(data, 0x4C)
+    method_ids_size, method_ids_off = _u32(data, 0x58), _u32(data, 0x5C)
+    if (
+        string_ids_size > max_strings
+        or type_ids_size > 65536
+        or class_defs_size > 65536
+        or proto_ids_size > 65536
+        or method_ids_size > 65536
+    ):
         raise DexError("implausible table sizes")
 
     strings = []
@@ -81,4 +91,29 @@ def _parse(data: bytes, max_strings: int) -> Dex:
                 raise DexError("implausible interface list")
             ifaces = [type_name(struct.unpack_from("<H", data, ifaces_off + 4 + 2 * j)[0]) for j in range(n)]
         classes.append((type_name(cls), type_name(sup), ifaces))
-    return Dex(strings, classes)
+
+    def type_list(off: int) -> list[str]:
+        if not off:
+            return []
+        n = _u32(data, off)
+        if n > 255:
+            raise DexError("implausible parameter list")
+        return [type_name(struct.unpack_from("<H", data, off + 4 + 2 * j)[0]) for j in range(n)]
+
+    protos = []
+    for i in range(proto_ids_size):
+        base = proto_ids_off + 12 * i
+        protos.append((type_name(_u32(data, base + 4)), type_list(_u32(data, base + 8))))
+
+    methods = []
+    for i in range(method_ids_size):
+        base = method_ids_off + 8 * i
+        if base + 8 > len(data):
+            raise DexError("read past the end")
+        cls_idx, proto_idx = struct.unpack_from("<HH", data, base)
+        name = _u32(data, base + 4)
+        if proto_idx >= len(protos) or name >= len(strings):
+            raise DexError("bad method id")
+        ret, params = protos[proto_idx]
+        methods.append((type_name(cls_idx), strings[name], params, ret))
+    return Dex(strings, classes, methods)
