@@ -488,3 +488,13 @@ def test_recommendation():
     assert cli.recommend(report(root, frida)) == "ca"  # nothing pinned: no Frida at all (DVBA)
     assert cli.recommend(report(pin, frida)) == "gadget"
     assert cli.recommend(report(pin, root)) == "hooks"
+
+
+def test_protected_apps_get_plain_advice(capsys):
+    from unpinned import analyze, cli
+
+    r = analyze.Report(apk.Triage("a.b"))
+    r.findings = [analyze.Finding("protector", "Talsec freeRASP", analyze.DEFINITE)]
+    cli.show_report(r)
+    out = capsys.readouterr().out
+    assert "Protected by Talsec freeRASP" in out and "unpinned phone" in out and "allowlisted" in out

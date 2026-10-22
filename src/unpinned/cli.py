@@ -114,6 +114,15 @@ TITLES = {
 }
 
 
+PROTECTOR_ADVICE = (
+    "Runtime protection (RASP) like this is built to spot emulators, root and instrumentation, and often ends the "
+    "app when it does, so expect the generic methods to struggle, especially on the emulator. What works best:\n"
+    "    · a real phone (`unpinned phone`), with root hidden from the app (Magisk DenyList and similar)\n"
+    "    · on an authorised test, a build with the protection in development / report-only mode, or with your test "
+    "device allowlisted: most protectors support this, and it's how protected apps are usually assessed"
+)
+
+
 def show_report(r: analyze.Report) -> None:
     t = r.triage
     say(
@@ -149,6 +158,8 @@ def show_report(r: analyze.Report) -> None:
             "\n  \033[2mPlay Integrity / SafetyNet is judged on Google's servers: an emulator fails device integrity "
             "whatever runs on it, so flows gated on it won't work here.\033[0m"
         )
+    if protectors := [f.label for f in r.of("protector")]:
+        print(f"\n  \033[33mProtected by {', '.join(protectors)}.\033[0m " + PROTECTOR_ADVICE)
     print()
 
 
