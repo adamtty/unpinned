@@ -453,3 +453,12 @@ def test_endpoints_drop_doc_and_schema_noise():
     )
     assert urls == ["https://api.x.net/v1/users?id=1", "https://cdn.x.net"]
     assert static.hosts(urls) == [("api.x.net", 1), ("cdn.x.net", 1)]
+
+
+def test_transparent_rules_only_touch_the_app_and_our_chains():
+    script = device._TRANSPARENT_SCRIPT.format(uid=10225, port=64473)
+    rules = [ln for ln in script.splitlines() if ln.startswith(("iptables", "ip6tables")) and " -A " in ln]
+    assert rules and all("--uid-owner 10225" in r for r in rules if "UNPINNED" in r and "-j UNPINNED" not in r)
+    assert "REDIRECT --to-ports 64473" in script and "! -d 127.0.0.0/8" in script  # never loop adb's own socket
+    for line in device._UNTRANSPARENT_SCRIPT.splitlines():
+        assert not line.strip() or "UNPINNED" in line or line.strip() == "true"  # cleanup can't touch other rules

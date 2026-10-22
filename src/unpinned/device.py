@@ -402,6 +402,57 @@ def set_proxy(serial: str, host: str | None, port: int = 0) -> None:
     shell(serial, f"settings put global http_proxy {shlex.quote(value)}", check=False)
 
 
+# Per-app transparent proxying: the app's TCP goes to the proxy (through `adb reverse` on 127.0.0.1) whatever its
+# proxy settings, matched on its uid, so nothing else on the device is touched. QUIC and IPv6 TCP are refused for
+# the app so it falls back to IPv4 TCP. Everything lives in UNPINNED_* chains, so cleanup removes exactly ours.
+_TRANSPARENT_SCRIPT = r"""
+set -e
+iptables -t nat -N UNPINNED_NAT 2>/dev/null || iptables -t nat -F UNPINNED_NAT
+iptables -t nat -C OUTPUT -j UNPINNED_NAT 2>/dev/null || iptables -t nat -I OUTPUT -j UNPINNED_NAT
+iptables -t nat -A UNPINNED_NAT -m owner --uid-owner {uid} -p tcp ! -d 127.0.0.0/8 -j REDIRECT --to-ports {port}
+iptables -N UNPINNED_FILTER 2>/dev/null || iptables -F UNPINNED_FILTER
+iptables -C OUTPUT -j UNPINNED_FILTER 2>/dev/null || iptables -I OUTPUT -j UNPINNED_FILTER
+iptables -A UNPINNED_FILTER -m owner --uid-owner {uid} -p udp --dport 443 -j REJECT
+ip6tables -N UNPINNED_FILTER 2>/dev/null || ip6tables -F UNPINNED_FILTER
+ip6tables -C OUTPUT -j UNPINNED_FILTER 2>/dev/null || ip6tables -I OUTPUT -j UNPINNED_FILTER
+ip6tables -A UNPINNED_FILTER -m owner --uid-owner {uid} -p tcp ! -d ::1 -j REJECT --reject-with tcp-reset
+ip6tables -A UNPINNED_FILTER -m owner --uid-owner {uid} -p udp --dport 443 -j REJECT
+echo unpinned-transparent-ok
+"""
+_UNTRANSPARENT_SCRIPT = r"""
+iptables -t nat -D OUTPUT -j UNPINNED_NAT 2>/dev/null; iptables -t nat -F UNPINNED_NAT 2>/dev/null
+iptables -t nat -X UNPINNED_NAT 2>/dev/null
+iptables -D OUTPUT -j UNPINNED_FILTER 2>/dev/null; iptables -F UNPINNED_FILTER 2>/dev/null
+iptables -X UNPINNED_FILTER 2>/dev/null
+ip6tables -D OUTPUT -j UNPINNED_FILTER 2>/dev/null; ip6tables -F UNPINNED_FILTER 2>/dev/null
+ip6tables -X UNPINNED_FILTER 2>/dev/null
+true
+"""
+
+
+def app_uid(serial: str, package: str) -> int:
+    out = shell(serial, f"dumpsys package {package}", check=False, timeout=60)
+    m = re.search(r"\buserId=(\d+)", out) or re.search(r"\bappId=(\d+)", out)
+    if not m:
+        raise DeviceError(f"couldn't find {package}'s uid on the device")
+    return int(m.group(1))
+
+
+def transparent_proxy(serial: str, package: str, port: int) -> int:
+    """Send the app's TCP to 127.0.0.1:port (adb reverse → the proxy), whatever its proxy settings. → its uid."""
+    uid = app_uid(serial, package)
+    if uid < 10000:
+        raise DeviceError(f"{package} runs as a system uid ({uid}); redirecting it would catch other apps too")
+    out = rootsh(serial, _TRANSPARENT_SCRIPT.format(uid=uid, port=int(port)), check=False, timeout=60)
+    if "unpinned-transparent-ok" not in out:
+        raise DeviceError(f"setting up the per-app redirect failed: {out.strip()[-300:]}")
+    return uid
+
+
+def remove_transparent_proxy(serial: str) -> None:
+    rootsh(serial, _UNTRANSPARENT_SCRIPT, check=False, timeout=60)
+
+
 def remove_reverse(serial: str) -> None:
     adb("reverse", "--remove-all", serial=serial, check=False)
 
