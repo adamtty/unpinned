@@ -131,6 +131,11 @@ unpinned phone spotify              # or do it on the phone itself
   data, so `phone` asks before doing it. The original goes back with `unpinned phone --restore <the pulled .apks>`.
 - **Traffic reaches your Mac** through `adb reverse` over the USB cable, or goes straight to your own proxy on the
   network.
+- **Without Frida** (the system-CA and apk-mitm methods), only the app's own traffic is sent to the proxy, with
+  `iptables` rules matched on its user ID. So it's caught even when the app ignores proxy settings (Flutter, raw
+  sockets), and nothing else on the device is touched. QUIC and IPv6 TCP are blocked for the app so it falls back to
+  IPv4 TCP. `--global-proxy` uses the device-wide proxy setting instead. The rules live in their own `UNPINNED_*`
+  chains, which cleanup removes, and nothing else.
 - **Cleanup:** `unpinned phone --cleanup` stops frida-server, unmounts the CA and clears the proxy setting. A reboot
   does too.
 - **It leaves your own setup alone.**

@@ -256,6 +256,7 @@ def _launch(
     device.shell(serial, f"am force-stop {package}", check=False)
     if strategy == "hooks":
         device.set_proxy(serial, None)
+        device.remove_transparent_proxy(serial)
         say("starting frida-server and spawning the app with the hooks")
         used = device.start_frida_server(serial, server, assets.frida_server_fallback)
         if used != "pinned":
@@ -270,7 +271,16 @@ def _launch(
                 print(f"    \033[2m{line.strip()[:150]}\033[0m")
     else:
         device.stop_frida_server(serial)  # nothing on the device for the app to find
-        device.set_proxy(serial, *proxy) if strategy in ("ca", "apk-mitm") else device.set_proxy(serial, None)
+        device.remove_transparent_proxy(serial)
+        device.set_proxy(serial, None)
+        if strategy in ("ca", "apk-mitm"):
+            host, port = proxy
+            if not a.global_proxy and host == "127.0.0.1":
+                uid = device.transparent_proxy(serial, package, port)
+                say(f"sending only {package}'s traffic (uid {uid}) to the proxy, whatever its proxy settings")
+            else:
+                device.set_proxy(serial, host, port)
+                say("using the device-wide proxy setting (apps may ignore it)")
         device.launch(serial, package)
 
 
@@ -564,6 +574,7 @@ def cmd_run(a) -> int:
 
 def _phone_cleanup(serial: str) -> None:
     device.stop_frida_server(serial)
+    device.remove_transparent_proxy(serial)
     device.remove_system_ca(serial)
     device.set_proxy(serial, None)
     device.remove_reverse(serial)
@@ -578,7 +589,7 @@ def cmd_phone(a) -> int:
     say(f"phone: {phone.describe(serial)} ({serial}), root via {phone.check_root(serial)}")
     if a.cleanup:
         _phone_cleanup(serial)
-        say("frida-server stopped, the CA unmounted, the proxy setting and adb reverse removed")
+        say("frida-server stopped, the CA unmounted, the per-app redirect, proxy setting and adb reverse removed")
         return 0
     if a.restore:
         bundle = Path(a.restore)
@@ -736,6 +747,11 @@ def build_parser() -> argparse.ArgumentParser:
         help="mitmweb doesn't verify the real servers' certificates (staging servers, self-signed test hosts)",
     )
     r.add_argument("--headless", action="store_true", help="no emulator window or scrcpy")
+    r.add_argument(
+        "--global-proxy",
+        action="store_true",
+        help="without Frida, use the device-wide proxy setting instead of redirecting just the app with iptables",
+    )
     r.set_defaults(fn=cmd_run)
     pl = sub.add_parser("pull", help="pull an installed app (every split) off a phone into one .apks")
     pl.add_argument("app", help="package name, or part of one to search for")
@@ -755,6 +771,11 @@ def build_parser() -> argparse.ArgumentParser:
     ph.add_argument("--no-auto-hooks", action="store_true", help="don't hook the app's own certificate checks")
     ph.add_argument("--insecure-upstream", action="store_true", help="mitmweb doesn't verify the real servers")
     ph.add_argument("--headless", action="store_true", help="no scrcpy window")
+    ph.add_argument(
+        "--global-proxy",
+        action="store_true",
+        help="without Frida, use the device-wide proxy setting instead of redirecting just the app with iptables",
+    )
     ph.add_argument("--cleanup", action="store_true", help="take frida-server, the CA and the proxy off the phone")
     ph.add_argument("--restore", metavar="BUNDLE", help="reinstall an original pulled before patching")
     ph.set_defaults(fn=cmd_phone)
