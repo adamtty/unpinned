@@ -48,6 +48,12 @@ LIBRARY_PREFIXES = (
     "Lcom/bumptech/",
     "Lcom/fasterxml/",
     "Lcom/amazon/",
+    # protectors / RASP SDKs: their certificate checks guard the app's own integrity, never something to hook
+    "Lapp/talsec/",
+    "Lcom/aheaditec/talsec",
+    "Lcom/guardsquare/",
+    "Lno/promon/",
+    "Lcom/appdome/",
 )
 CERT_FILE_RE = re.compile(r"^(assets|res)/.+\.(cer|crt|pem|der|bks|p12|pfx|jks)$", re.I)
 
