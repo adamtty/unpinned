@@ -183,6 +183,9 @@ unpinned is MIT.
 
 ## Roadmap
 
+- **Real rooted devices:** point unpinned at an app already installed on a rooted phone. It pulls a copy (every
+  split) off the device, triages and patches it, installs the fixed build back, and sets up the proxy and CA on the
+  device.
 - A container fleet: Redroid on an ARM server, with Tailscale for access.
 - A fix or workaround for the gadget on Android 16, and broader tests of the refuse → patch → reopen loop.
 - Flutter pattern updates, and reFlutter as a fallback.
