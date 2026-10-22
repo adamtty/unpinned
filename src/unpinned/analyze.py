@@ -48,6 +48,12 @@ LIBRARY_PREFIXES = (
     "Lcom/bumptech/",
     "Lcom/fasterxml/",
     "Lcom/amazon/",
+    # protectors / RASP SDKs: their certificate checks guard the app's own integrity, never something to hook
+    "Lapp/talsec/",
+    "Lcom/aheaditec/talsec",
+    "Lcom/guardsquare/",
+    "Lno/promon/",
+    "Lcom/appdome/",
 )
 CERT_FILE_RE = re.compile(r"^(assets|res)/.+\.(cer|crt|pem|der|bks|p12|pfx|jks)$", re.I)
 
@@ -172,6 +178,18 @@ def _scan_bytes(z: zipfile.ZipFile, name: str, needles: dict[str, bytes]) -> set
 
 
 # --- signals ---------------------------------------------------------------------------------------------------
+# native libraries whose names give a protection away (DVBA's libfrida-check.so, RootBeer's libtool-checker.so, …)
+PROTECTION_LIBS = [
+    ("anti_frida", re.compile(r"frida|anti.?hook", re.I), "Frida detection library"),
+    (
+        "root",
+        re.compile(r"tool-?checker|root.?(check|detect|beer)|jail.?break|magisk.?detect", re.I),
+        "root detection library",
+    ),
+    ("anti_debug", re.compile(r"anti.?debug", re.I), "debugger detection library"),
+    ("protector", re.compile(r"tamper|integrity.?check|anti.?tamper", re.I), "tamper detection library"),
+]
+
 ROOT_STRINGS = [
     "/system/xbin/su",
     "/system/bin/su",
@@ -443,6 +461,11 @@ def analyze(apks: list[Path]) -> Report:
     dbg = [s for s in DEBUG_STRINGS if s in strings] + sorted(native_hits.get("TracerPid", set()))
     if dbg:
         add(Finding("anti_debug", "debugger detection", POSSIBLE, dbg[:4]))
+    native_libs = sorted({n.rsplit("/", 1)[-1] for n in names if n.startswith("lib/") and n.endswith(".so")})
+    for category, rx, label in PROTECTION_LIBS:
+        hits = [lib for lib in native_libs if rx.search(lib) and not lib.startswith("libfrida-gadget")]
+        if hits:
+            add(Finding(category, label, LIKELY, hits[:4]))
     for label in t.protectors:
         add(Finding("protector", label, LIKELY, ["native library names"]))
     return rep

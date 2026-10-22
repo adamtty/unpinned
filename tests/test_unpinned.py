@@ -462,3 +462,29 @@ def test_transparent_rules_only_touch_the_app_and_our_chains():
     assert "REDIRECT --to-ports 64473" in script and "! -d 127.0.0.0/8" in script  # never loop adb's own socket
     for line in device._UNTRANSPARENT_SCRIPT.splitlines():
         assert not line.strip() or "UNPINNED" in line or line.strip() == "true"  # cleanup can't touch other rules
+
+
+def test_protection_libraries_by_name():
+    from unpinned import analyze
+
+    def cats(lib):
+        return {c for c, rx, _ in analyze.PROTECTION_LIBS if rx.search(lib)}
+
+    assert cats("libfrida-check.so") == {"anti_frida"} and cats("libtool-checker.so") == {"root"}
+    assert cats("libantidebug.so") == {"anti_debug"} and cats("libflutter.so") == set()
+
+
+def test_recommendation():
+    from unpinned import analyze, cli
+
+    def report(*findings):
+        r = analyze.Report(apk.Triage("a.b"))
+        r.findings = list(findings)
+        return r
+
+    pin = analyze.Finding("pinning", "pins", analyze.DEFINITE)
+    frida = analyze.Finding("anti_frida", "lib", analyze.LIKELY)
+    root = analyze.Finding("root", "lib", analyze.LIKELY)
+    assert cli.recommend(report(root, frida)) == "ca"  # nothing pinned: no Frida at all (DVBA)
+    assert cli.recommend(report(pin, frida)) == "gadget"
+    assert cli.recommend(report(pin, root)) == "hooks"
