@@ -312,3 +312,41 @@ def test_a_string_offset_past_the_end_is_a_dex_error():
 def test_manifest_class_names_cannot_be_paths(tmp_path):
     with pytest.raises(patch.PatchError):
         patch._find_smali(tmp_path, "../../../etc/x", "a.b")
+
+
+# --- phones ---------------------------------------------------------------------------------------------------
+from unpinned import phone  # noqa: E402
+
+TCP = """  sl  local_address rem_address   st tx_queue rx_queue tr tm->when retrnsmt   uid  timeout inode
+   0: 0100007F:E2F4 00000000:0000 0A 00000000:00000000 00:00000000 00000000  2000        0 3797695 1 0
+   1: 0100007F:69A2 0100007F:9A9B 06 00000000:00000000 03:00001508 00000000     0        0 0 3 0
+"""
+
+
+def test_frida_port_only_counts_when_listening():
+    assert not device.listening_on(TCP, 27042)  # 69A2 is there, but in TIME_WAIT (a crashed server)
+    assert device.listening_on(TCP.replace("9A9B 06", "9A9B 0A"), 27042)
+    assert device.listening_on(TCP, 0xE2F4)
+
+
+@pytest.mark.parametrize(
+    "path,ok",
+    [
+        ("/data/app/com.x-AbC==/base.apk", True),
+        ("/data/app/~~q1w2==/com.x-9z==/split_config.arm64_v8a.apk", True),
+        ("/system/priv-app/Foo/Foo.apk", True),
+        ("/data/app/x/base.apk; rm -rf /", False),
+        ("/sdcard/evil.apk", False),
+        ("../../etc/passwd.apk", False),
+    ],
+)
+def test_phone_apk_paths(path, ok):
+    assert bool(phone.APK_PATH_RE.match(path)) is ok
+
+
+def test_remove_ca_only_touches_unpinned_mounts():
+    assert (
+        "= unpinned" in device._REMOVE_CA_SCRIPT
+        and "umount /system/etc/security/cacerts\n" not in device._REMOVE_CA_SCRIPT
+    )
+    assert 'mount -t tmpfs unpinned "$SYS"' in device._SYSTEM_CA_SCRIPT
