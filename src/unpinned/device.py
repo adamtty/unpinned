@@ -135,6 +135,8 @@ def boot(api: str, cold: bool = False, window: bool = True) -> str:
             new = [s for s in serials() if s not in before]
             serial = new[0] if new else running(api)
         if serial and shell(serial, "getprop sys.boot_completed", check=False).strip() == "1":
+            if not cold:
+                wait_network(serial)  # booted from the snapshot: the network comes back a little later
             return serial
         time.sleep(2)
     raise DeviceError(f"the emulator didn't finish booting within {BOOT_TIMEOUT}s (see {env.home() / 'emulator.log'})")
@@ -243,6 +245,17 @@ def save_snapshot(serial: str) -> None:
         raise DeviceError(f"saving the snapshot failed: {out.strip()[:300]}")
 
 
+def wait_network(serial: str, timeout: float = 30) -> bool:
+    """After a snapshot load the emulator's network takes a few seconds to come back; an app launched before that
+    fails its first direct (unproxied) connections. → whether DNS worked in time."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if "ok" in shell(serial, "ping -c1 -W2 dns.google >/dev/null 2>&1 && echo ok", check=False, timeout=10):
+            return True
+        time.sleep(1)
+    return False
+
+
 def reset(serial: str) -> None:
     """Back to the clean snapshot: no apps, no data, nothing from the last run."""
     out = adb("emu", "avd", "snapshot", "load", env.SNAPSHOT, serial=serial, timeout=300)
@@ -252,6 +265,7 @@ def reset(serial: str) -> None:
             "the emulator was updated: run `unpinned setup` again to rebuild it"
         )
     wait_booted(serial)
+    wait_network(serial)
 
 
 # frida-server 17.6+ segfaults at start-up on some older devices (Samsung, Android 9 / kernel 4.4); 17.5.2 runs there
