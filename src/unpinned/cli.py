@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from unpinned import analyze, apk, assets, certs, device, env, intercept, patch, phone, watch
+from unpinned import analyze, apk, assets, certs, device, env, hooks, intercept, patch, phone, watch
 
 STRATEGIES = {
     "hooks": "root + Frida hooks: unpinning, root-detection bypass, proxy redirect (the app is untouched)",
@@ -305,6 +305,24 @@ def gadget_api(a) -> str:
     return pick
 
 
+def _pin_check_hooks(a, r: analyze.Report, run_dir: Path) -> Path | None:
+    """Offer to hook the app's own certificate checks found by triage; → the generated script, or None."""
+    if not r.pin_checks or a.no_auto_hooks:
+        return None
+    if interactive() and not a.yes:
+        print()
+        for c in r.pin_checks[:10]:
+            print(f"    · {c.label()}")
+        if input(
+            f"\033[1m › hook these {len(r.pin_checks)} certificate check(s) to always pass? [Y/n] \033[0m"
+        ).strip().lower() not in ("", "y"):
+            return None
+    path = run_dir / "pin-checks.js"
+    path.write_text(hooks.script(r.pin_checks))
+    say(f"hooking {len(r.pin_checks)} of the app's own certificate check(s)")
+    return path
+
+
 def _setup_proxy(a, serial: str, own, run_dir: Path) -> tuple[str, int, str | None, Path]:
     """Point the device at the proxy and trust its CA system-wide. → (host as the device sees it, port, mitmweb URL,
     config.js for the hooks)."""
@@ -325,12 +343,26 @@ def _setup_proxy(a, serial: str, own, run_dir: Path) -> tuple[str, int, str | No
     return host, port, url, intercept.write_config(ca, host, port, run_dir)
 
 
-def _patch(kind: str, original: Path, package: str, config: Path, run_dir: Path, api: str | None) -> list[Path]:
+def _patch(
+    kind: str,
+    original: Path,
+    package: str,
+    config: Path,
+    run_dir: Path,
+    api: str | None,
+    extra: list[Path] | None = None,
+) -> list[Path]:
     if kind == "gadget":
         if api and not api.startswith(("1", "2", "30", "31", "32", "33", "34", "35")):
             warn(f"on Android {api} the gadget can crash ({FRIDA_A16_BUG}); `--api {GADGET_STABLE_API}` is stable")
         say("patching in Frida's gadget: the root-detection bypass and unpinning run before the app's own code")
-        return patch.gadget(apk.load(original, run_dir / "orig"), package, config.read_text(), run_dir / "gadget")
+        return patch.gadget(
+            apk.load(original, run_dir / "orig"),
+            package,
+            config.read_text(),
+            run_dir / "gadget",
+            extra=[p.read_text() for p in extra or []],
+        )
     say("repackaging with apk-mitm")
     return patch.apk_mitm(original, run_dir / "apk-mitm")
 
@@ -357,7 +389,7 @@ def _run_and_watch(
         if nxt == "stop" or (confirm_reinstall and not confirm_reinstall()):
             return None
         tried.add(nxt)
-        apks = _patch(nxt, original, package, config, run_dir, api)
+        apks = _patch(nxt, original, package, config, run_dir, api, [Path(x) for x in a.script or []])
         strategy = nxt
 
 
@@ -423,6 +455,8 @@ def cmd_run(a) -> int:
     r = analyze.analyze(apks)
     package = r.triage.package
     show_report(r)
+    if auto := _pin_check_hooks(a, r, run_dir):
+        a.script = [*(a.script or []), str(auto)]
 
     rec = a.strategy if a.strategy != "auto" else recommend(r)
     strategy = choose("How should unpinned get at the traffic?", list(STRATEGIES.items()), rec, a.yes)
@@ -445,7 +479,7 @@ def cmd_run(a) -> int:
     if strategy == "gadget" and not device.uses_cc_gc(serial):
         warn("this snapshot predates the garbage-collector switch: run `unpinned setup` again")
     if strategy in ("gadget", "apk-mitm"):
-        apks = _patch(strategy, original, package, config, run_dir, a.api)
+        apks = _patch(strategy, original, package, config, run_dir, a.api, [Path(x) for x in a.script or []])
     if not a.headless:
         intercept.start_scrcpy(serial, f"unpinned · {package}")
 
@@ -497,6 +531,8 @@ def cmd_phone(a) -> int:
     say(f"saved {original}")
     r = analyze.analyze(apk.load(original, run_dir / "apks"))
     show_report(r)
+    if auto := _pin_check_hooks(a, r, run_dir):
+        a.script = [*(a.script or []), str(auto)]
 
     rec = a.strategy if a.strategy != "auto" else recommend(r)
     if rec in ("gadget", "apk-mitm") and a.strategy == "auto":
@@ -522,7 +558,7 @@ def cmd_phone(a) -> int:
     server = assets.ensure_frida_server()
     host, port, url, config = _setup_proxy(a, serial, own, run_dir)
     if strategy in ("gadget", "apk-mitm"):
-        apks = _patch(strategy, original, package, config, run_dir, None)
+        apks = _patch(strategy, original, package, config, run_dir, None, [Path(x) for x in a.script or []])
     if not a.headless:
         intercept.start_scrcpy(serial, f"unpinned · {package}")
 
@@ -622,6 +658,7 @@ def build_parser() -> argparse.ArgumentParser:
     r.add_argument("--proxy", metavar="HOST:PORT", help="your own proxy (Burp, HTTP Toolkit, …) instead of mitmweb")
     r.add_argument("--ca", help="your proxy's CA certificate, PEM or DER (stored in certs/; asked for if omitted)")
     r.add_argument("--script", action="append", help="extra Frida script to load after the hooks (repeatable)")
+    r.add_argument("--no-auto-hooks", action="store_true", help="don't hook the app's own certificate checks")
     r.add_argument(
         "--insecure-upstream",
         action="store_true",
@@ -644,6 +681,7 @@ def build_parser() -> argparse.ArgumentParser:
     ph.add_argument("--proxy", metavar="HOST:PORT", help="your own proxy instead of mitmweb")
     ph.add_argument("--ca", help="your proxy's CA certificate, PEM or DER")
     ph.add_argument("--script", action="append", help="extra Frida script to load after the hooks")
+    ph.add_argument("--no-auto-hooks", action="store_true", help="don't hook the app's own certificate checks")
     ph.add_argument("--insecure-upstream", action="store_true", help="mitmweb doesn't verify the real servers")
     ph.add_argument("--headless", action="store_true", help="no scrcpy window")
     ph.add_argument("--cleanup", action="store_true", help="take frida-server, the CA and the proxy off the phone")

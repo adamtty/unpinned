@@ -10,7 +10,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from unpinned import apk, dex, env
+from unpinned import apk, dex, env, hooks
 
 DEFINITE, LIKELY, POSSIBLE = "definite", "likely", "possible"
 MAX_SCAN = 256 * 1024 * 1024  # bytes of native code / bundles scanned per member
@@ -38,6 +38,16 @@ LIBRARY_PREFIXES = (
     "Lio/sentry/",
     "Lcom/datatheorem/",
     "Lcom/appmattus/",
+    "Lorg/chromium/",
+    "Lorg/bouncycastle/",
+    "Lio/netty/",
+    "Lio/ktor/",
+    "Lcom/amazonaws/",
+    "Lcom/microsoft/",
+    "Lj$/",
+    "Lcom/bumptech/",
+    "Lcom/fasterxml/",
+    "Lcom/amazon/",
 )
 CERT_FILE_RE = re.compile(r"^(assets|res)/.+\.(cer|crt|pem|der|bks|p12|pfx|jks)$", re.I)
 
@@ -55,6 +65,7 @@ class Report:
     triage: apk.Triage
     findings: list[Finding] = field(default_factory=list)
     nsc: dict = field(default_factory=dict)
+    pin_checks: list[hooks.PinCheck] = field(default_factory=list)  # the app's own certificate checks
 
     def of(self, *categories: str) -> list[Finding]:
         return [f for f in self.findings if f.category in categories]
@@ -249,6 +260,7 @@ def analyze(apks: list[Path]) -> Report:
     # dex: strings and classes
     strings: set[str] = set()
     classes: list[tuple[str, str, list[str]]] = []
+    methods: list[tuple[str, str, list[str], str]] = []
     names: list[str] = []
     native_hits: dict[str, set[str]] = {}
     flutter_hits: set[str] = set()
@@ -270,6 +282,7 @@ def analyze(apks: list[Path]) -> Report:
                         continue
                     strings.update(d.strings)
                     classes += d.classes
+                    methods += d.methods
                 elif n.endswith("/libapp.so"):
                     flutter_hits |= _scan_bytes(z, n, FLUTTER_NEEDLES)
                 elif n == "assets/index.android.bundle":
@@ -325,6 +338,18 @@ def analyze(apks: list[Path]) -> Report:
                 "the app's own TrustManager" + (" (with public key hashing)" if digest else ""),
                 LIKELY if digest else POSSIBLE,
                 [_java(c) for c in own_tms[:5]],
+            )
+        )
+    app_classes = {c for c, _, _ in classes if not c.startswith(LIBRARY_PREFIXES)}
+    rep.pin_checks = hooks.candidates(methods, app_classes, set(own_tms))
+    if rep.pin_checks:
+        add(
+            Finding(
+                "pinning",
+                "the app's own certificate checks (unpinned can hook these)",
+                LIKELY,
+                [c.label() for c in rep.pin_checks[:4]]
+                + ([f"+{len(rep.pin_checks) - 4} more"] if len(rep.pin_checks) > 4 else []),
             )
         )
     own_hv = sorted(
