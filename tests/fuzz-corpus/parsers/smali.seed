@@ -1,0 +1,6 @@
+.class public La/App;
+.method static constructor <clinit>()V
+    .locals 0
+    return-void
+.end method
+<application android:extractNativeLibs="false">

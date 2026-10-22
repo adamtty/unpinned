@@ -1,0 +1,2 @@
+<network-security-config><domain-config><pin-set><pin digest="SHA-256">X</pin></pin-set><trust-anchors><certificates src="@raw/r"/></trust-anchors></domain-config></network-security-config>
+package: name='a.b' versionName='1'

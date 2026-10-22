@@ -1,0 +1,33 @@
+[project]
+name = "unpinned"
+version = "0.1.0"
+description = "Drop an APK, get a fresh rooted Android emulator with the app running, unpinned, and its traffic in mitmproxy"
+readme = "README.md"
+license = "MIT"
+requires-python = ">=3.11"
+dependencies = [
+    "frida==17.24.3",       # frida-server on the device is downloaded to match this exact version
+    "frida-tools==14.11.0",
+]
+
+[project.scripts]
+unpinned = "unpinned.cli:main"
+
+[dependency-groups]
+dev = ["pytest>=8", "ruff>=0.14"]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.ruff]
+line-length = 120
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "B", "UP", "S", "RUF"]
+ignore = ["S603", "S607", "RUF001"]  # every subprocess is an argv list of known tools; › and · are deliberate
+
+[tool.ruff.lint.per-file-ignores]
+"src/unpinned/assets.py" = ["E501"]  # pinned hashes
+"tests/*" = ["S101", "S108", "S311"]
