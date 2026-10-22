@@ -125,8 +125,9 @@ uv run unpinned setup
 
 ## Tested
 
-Against HTTP Toolkit's [pinning demo](https://github.com/httptoolkit/android-ssl-pinning-demo) (v1.7.1) on
-Android 16, with `--insecure-upstream` (its test servers use an untrusted root on purpose):
+Against HTTP Toolkit's [pinning demo](https://github.com/httptoolkit/android-ssl-pinning-demo) (v1.7.1), with
+`--insecure-upstream` (its test servers use an untrusted root on purpose). Hooks on Android 16; the gadget on
+Android 14, where it's stable ([why](#known-issues)):
 
 | Pinning / check | Root + Frida hooks | Gadget patch |
 |---|---|---|
@@ -134,16 +135,27 @@ Android 16, with `--insecure-upstream` (its test servers use an untrusted root o
 | Network security config pin, context pin, OkHttp, Volley, TrustKit | ✅ | ✅ |
 | Certificate Transparency (Android, Appmattus, Appmattus + OkHttp, Appmattus + raw TLS) | ✅ | ✅ |
 | Flutter (via the system CA) | ✅ | ✅ |
-| HTTP/3 (Cronet) | ✅ | ❌ crashes the app ([known issue](#known-issues)) |
+| HTTP/3 (Cronet) | ✅ | ✅ |
 | Raw custom pinning (the app hashes the key itself) | ❌ needs an app-specific hook | ❌ |
 
 Triage on the same app reports every one of those techniques, including the raw custom `TrustManager` by class name.
 
 ## Known issues
 
-- **Gadget patch on Android 16:** the patched app can crash in ART's new garbage collector while Frida's Java bridge
-  is loaded through the gadget (seen on the HTTP/3 request). The frida-server route doesn't do this. Treat the gadget
-  as experimental on Android 16.
+- **Gadget patch on Android 16:** Frida's Java hooks, run inside the app through the gadget, can crash ART's garbage
+  collector while it walks a hooked thread's stack. This is an open Frida bug
+  ([frida#3805](https://github.com/frida/frida/issues/3805),
+  [frida-java-bridge#387](https://github.com/frida/frida-java-bridge/issues/387)): Android 16's `libart` no longer
+  ships the symbols Frida uses to install its GC hook.
+  - **Use Android 14 for gadget runs.** It's stable there (6 of 6 runs). When you choose the gadget on Android 16,
+    `run` offers to switch to the Android 14 emulator if you've set it up (`unpinned --api 34 setup`).
+  - **On Android 16 it's flaky, not hopeless.** `setup` switches unpinned's emulator to ART's concurrent-copying
+    collector, which helps (5 of 7 runs survive, against 0 of 4 on the default collector) but doesn't fix it.
+  - The frida-server route (root + hooks) isn't affected.
+- **Plain HTTP that ignores the proxy** (`Proxy.NO_PROXY`) isn't caught by the gadget on Android 14. It's plain
+  HTTP, so there's no pinning to bypass.
+- **Emulator updates break the snapshot.** Snapshots are tied to the emulator version, so after the Android SDK
+  updates the emulator, `run` asks you to run `unpinned setup` again.
 - **Without `--insecure-upstream`,** a pinned request to a server the proxy can't verify can make HTTP Toolkit's
   native TLS hook crash the app on Android 16. On Android 14 it fails cleanly.
 - **Root is mostly invisible:** the emulator is rooted through `adbd`, and SELinux hides `su` from apps, so many
@@ -187,6 +199,6 @@ unpinned is MIT.
   split) off the device, triages and patches it, installs the fixed build back, and sets up the proxy and CA on the
   device.
 - A container fleet: Redroid on an ARM server, with Tailscale for access.
-- A fix or workaround for the gadget on Android 16, and broader tests of the refuse → patch → reopen loop.
+- The gadget on Android 16, once Frida's GC fix lands; broader tests of the refuse → patch → reopen loop.
 - Flutter pattern updates, and reFlutter as a fallback.
 - apkid in triage, plus a scrcpy-in-the-browser view.

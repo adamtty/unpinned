@@ -90,7 +90,10 @@ def cmd_setup(a) -> int:
     say("cold-booting it for the first time (a minute or two)")
     serial = device.boot(a.api, cold=True, window=not a.headless)
     say("rooting adbd, pushing frida-server, turning off animations and install verification")
+    device.settle(serial)
     device.prepare(serial, server)
+    say("switching ART to its concurrent-copying garbage collector (gadget-patched apps need it; one reboot)")
+    device.use_cc_gc(serial)
     say(f"saving the clean snapshot '{env.SNAPSHOT}'")
     device.save_snapshot(serial)
     say("done: `unpinned run app.apk`")
@@ -258,6 +261,35 @@ def pick_proxy(a) -> tuple[str, int, Path] | None:
     return host, port, ca.path
 
 
+GADGET_STABLE_API = "34"
+FRIDA_A16_BUG = "https://github.com/frida/frida/issues/3805"
+
+
+def gadget_api(a) -> str:
+    """Frida's Java hooks inside a gadget can crash ART's garbage collector on Android 16 (an open Frida bug), while
+    Android 14 is stable: offer to run gadget builds there."""
+    try:
+        major = float(a.api)
+    except ValueError:
+        return a.api
+    if major < 36:
+        return a.api
+    warn(f"gadget-patched apps can crash on Android 16: an open Frida bug in its Java hooks ({FRIDA_A16_BUG})")
+    if not device.has_snapshot(GADGET_STABLE_API):
+        say(
+            f"for stable gadget runs: `unpinned --api {GADGET_STABLE_API} setup`, then run with "
+            f"`--api {GADGET_STABLE_API}`"
+        )
+        return a.api
+    pick = choose(
+        "Run it on Android 14 instead (stable with the gadget)?",
+        [(GADGET_STABLE_API, "yes, use the Android 14 emulator"), (a.api, f"no, stay on Android {a.api}")],
+        GADGET_STABLE_API,
+        a.yes,
+    )
+    return pick
+
+
 def cmd_run(a) -> int:
     if not device.has_snapshot(a.api):
         warn("no clean snapshot yet: run `unpinned setup` first")
@@ -271,6 +303,8 @@ def cmd_run(a) -> int:
     rec = a.strategy if a.strategy != "auto" else recommend(r)
     strategy = choose("How should unpinned get at the traffic?", list(STRATEGIES.items()), rec, a.yes)
     say(f"using: {strategy}")
+    if strategy == "gadget":
+        a.api = gadget_api(a)
     own = pick_proxy(a)
 
     assets.ensure_scripts()
@@ -299,6 +333,11 @@ def cmd_run(a) -> int:
     device.install_system_ca(serial, ca_path)
     config = intercept.write_config(ca, host, port, run_dir)
 
+    if strategy == "gadget" and not device.uses_cc_gc(serial):
+        warn(
+            "this snapshot predates the garbage-collector switch gadget-patched apps need on Android 16: "
+            "run `unpinned setup` again"
+        )
     if strategy == "gadget":
         say("patching in Frida's gadget with the hooks (apktool; a minute or two)")
         apks = patch.gadget(apks, package, config.read_text(), run_dir / "gadget")
@@ -326,6 +365,10 @@ def cmd_run(a) -> int:
             return 2
         tried.add(nxt)
         if nxt == "gadget":
+            if not a.api.startswith(("1", "2", "30", "31", "32", "33", "34", "35")):
+                warn(
+                    f"on Android {a.api} the gadget can crash ({FRIDA_A16_BUG}); `--api {GADGET_STABLE_API}` is stable"
+                )
             say("patching in Frida's gadget: the root-detection bypass and unpinning run before the app's own code")
             apks = patch.gadget(
                 apk.load(Path(a.app), run_dir / "orig"), package, config.read_text(), run_dir / "gadget"

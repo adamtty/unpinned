@@ -147,6 +147,18 @@ def wait_booted(serial: str, timeout: float = BOOT_TIMEOUT) -> None:
     raise DeviceError(f"{serial} didn't finish booting within {timeout:.0f}s")
 
 
+def settle(serial: str, timeout: float = 120) -> None:
+    """After boot_completed: wait for the boot animation to stop and the package manager to answer, so a snapshot
+    taken now isn't of a system still starting up."""
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        anim = shell(serial, "getprop init.svc.bootanim", check=False, timeout=10).strip()
+        pm = shell(serial, "pm path android", check=False, timeout=20).strip()
+        if anim in ("stopped", "") and pm.startswith("package:"):
+            return
+        time.sleep(2)
+
+
 def root(serial: str) -> None:
     if shell(serial, "id -u", check=False).strip() == "0":
         return
@@ -175,6 +187,34 @@ def prepare(serial: str, frida_server: Path) -> None:
         shell(serial, cmd, check=False)
 
 
+# Android 14+ ART can use the CMC (userfaultfd) garbage collector. Frida's Java hooks running inside the app through
+# the gadget crash it on Android 16 (stack walks over hooked frames), while the older concurrent-copying collector is
+# fine. The switch is a boot-time flag, so it's set once at setup and lives in the clean snapshot.
+CC_GC_FLAG = "persist.device_config.runtime_native_boot.force_disable_uffd_gc"
+
+
+def uses_cc_gc(serial: str) -> bool:
+    return shell(serial, f"getprop {CC_GC_FLAG}", check=False).strip() == "true"
+
+
+def use_cc_gc(serial: str) -> None:
+    """Switch ART to the concurrent-copying collector (one reboot)."""
+    if uses_cc_gc(serial):
+        return
+    shell(serial, "device_config put runtime_native_boot force_disable_uffd_gc true")
+    shell(serial, "setprop sys.boot_completed 0", check=False)  # so the old "1" can't pass for the new boot
+    adb("reboot", serial=serial, check=False, timeout=60)
+    deadline = time.monotonic() + 60
+    while time.monotonic() < deadline and serial in serials():  # wait for it to actually go down
+        time.sleep(1)
+    adb("wait-for-device", serial=serial, timeout=BOOT_TIMEOUT)
+    wait_booted(serial)
+    settle(serial)
+    root(serial)
+    if not uses_cc_gc(serial):
+        raise DeviceError("couldn't switch the emulator to the concurrent-copying garbage collector")
+
+
 def save_snapshot(serial: str) -> None:
     out = adb("emu", "avd", "snapshot", "save", env.SNAPSHOT, serial=serial, timeout=300)
     if "KO" in out:
@@ -185,7 +225,10 @@ def reset(serial: str) -> None:
     """Back to the clean snapshot: no apps, no data, nothing from the last run."""
     out = adb("emu", "avd", "snapshot", "load", env.SNAPSHOT, serial=serial, timeout=300)
     if "KO" in out:
-        raise DeviceError(f"loading the clean snapshot failed: {out.strip()[:300]}")
+        raise DeviceError(
+            "the clean snapshot wouldn't load. Snapshots are tied to the emulator version, so this usually means "
+            "the emulator was updated: run `unpinned setup` again to rebuild it"
+        )
     wait_booted(serial)
 
 
