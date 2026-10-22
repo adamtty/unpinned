@@ -43,6 +43,15 @@ unpinned run app.apk        # triage → choose → reset → install → unpin 
    to hook those to pass, logging every call they override (`--no-auto-hooks` to skip). Methods that only take a
    public key are left alone: those verify signatures, like license or purchase receipts, not certificates.
 
+   It also runs the standard static checks:
+   - **Manifest:** `debuggable`, `allowBackup`, cleartext HTTP; exported activities, services, receivers and
+     providers with no permission guarding them (including the implicit exports older target SDKs get); deep links.
+   - **Hard-coded secrets:** Google API keys, Firebase database URLs, AWS keys, private keys, Slack, Stripe and
+     GitHub tokens, JWTs. Masked unless you pass `--show-secrets`.
+   - **Endpoints:** every URL in the code, resources and assets, by host. Documentation links are filtered out.
+
+   `unpinned triage APP --json report.json` writes all of it out, and `--endpoints` lists every URL.
+
    Known third-party libraries (Cronet, Flutter's engine, crash reporters…) are skipped, so their strings don't
    count against the app.
 

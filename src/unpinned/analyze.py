@@ -10,7 +10,7 @@ import zipfile
 from dataclasses import dataclass, field
 from pathlib import Path
 
-from unpinned import apk, dex, env, hooks
+from unpinned import apk, dex, env, hooks, static
 
 DEFINITE, LIKELY, POSSIBLE = "definite", "likely", "possible"
 MAX_SCAN = 256 * 1024 * 1024  # bytes of native code / bundles scanned per member
@@ -66,6 +66,9 @@ class Report:
     findings: list[Finding] = field(default_factory=list)
     nsc: dict = field(default_factory=dict)
     pin_checks: list[hooks.PinCheck] = field(default_factory=list)  # the app's own certificate checks
+    manifest: static.Manifest = field(default_factory=static.Manifest)
+    secrets: list[static.Secret] = field(default_factory=list)
+    endpoints: list[str] = field(default_factory=list)
 
     def of(self, *categories: str) -> list[Finding]:
         return [f for f in self.findings if f.category in categories]
@@ -266,6 +269,7 @@ def analyze(apks: list[Path]) -> Report:
     flutter_hits: set[str] = set()
     rn_hits: set[str] = set()
     cert_files: list[str] = []
+    asset_texts: list[str] = []
     for a in apks:
         with zipfile.ZipFile(a) as z:
             for info in z.infolist():
@@ -292,6 +296,11 @@ def analyze(apks: list[Path]) -> Report:
                         native_hits.setdefault(hit, set()).add(n.rsplit("/", 1)[-1])
                 if CERT_FILE_RE.match(n):
                     cert_files.append(n)
+                if static.TEXT_ASSET.match(n) and info.file_size <= 4 * 1024 * 1024:
+                    try:
+                        asset_texts.append(z.read(n).decode("utf-8", "replace"))
+                    except (OSError, zipfile.BadZipFile):
+                        pass
 
     def has_type(prefix: str) -> bool:
         return any(s.startswith(prefix) for s in strings)
@@ -352,6 +361,10 @@ def analyze(apks: list[Path]) -> Report:
                 + ([f"+{len(rep.pin_checks) - 4} more"] if len(rep.pin_checks) > 4 else []),
             )
         )
+    rep.manifest = static.manifest(base)
+    res_strings = static.resource_strings(base)
+    rep.secrets = static.secrets({"code": strings, "resources": res_strings, "assets": asset_texts})
+    rep.endpoints = static.endpoints([*strings, *res_strings, *asset_texts])
     own_hv = sorted(
         c for c, _, ifs in classes if "Ljavax/net/ssl/HostnameVerifier;" in ifs and not c.startswith(LIBRARY_PREFIXES)
     )

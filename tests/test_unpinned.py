@@ -381,3 +381,75 @@ def test_frida_types():
 def test_pin_check_script_carries_its_targets_as_data():
     s = hooks.script([hooks.PinCheck("x.App", "check", ("java.lang.String",), "boolean")])
     assert '[["x.App", "check", ["java.lang.String"], "boolean"]]' in s and "callApplicationOnCreate" in s
+
+
+# --- static checks ---------------------------------------------------------------------------------------------
+from unpinned import static  # noqa: E402
+
+NS = "http://schemas.android.com/apk/res/android:"
+LAUNCHER = "android.intent.category.LAUNCHER"
+BROWSABLE = "android.intent.category.BROWSABLE"
+XMLTREE = f"""N: android=http://schemas.android.com/apk/res/android (line=2)
+  E: manifest (line=2)
+    A: package="x.app" (Raw: "x.app")
+      E: uses-sdk (line=7)
+        A: {NS}targetSdkVersion(0x01010270)=30
+      E: application (line=9)
+        A: {NS}debuggable(0x0101000f)=true
+          E: activity (line=10)
+            A: {NS}name(0x01010003)="x.app.Main" (Raw: "x.app.Main")
+              E: intent-filter (line=11)
+                  E: action (line=12)
+                    A: {NS}name(0x01010003)="android.intent.action.MAIN" (Raw: "android.intent.action.MAIN")
+                  E: category (line=13)
+                    A: {NS}name(0x01010003)="{LAUNCHER}" (Raw: "{LAUNCHER}")
+          E: activity (line=20)
+            A: {NS}name(0x01010003)="x.app.Link" (Raw: "x.app.Link")
+              E: intent-filter (line=21)
+                  E: category (line=22)
+                    A: {NS}name(0x01010003)="{BROWSABLE}" (Raw: "{BROWSABLE}")
+                  E: data (line=23)
+                    A: {NS}scheme(0x01010027)="https" (Raw: "https")
+                  E: data (line=24)
+                    A: {NS}host(0x01010028)="x.example.net" (Raw: "x.example.net")
+                    A: {NS}pathPrefix(0x0101002b)="/open" (Raw: "/open")
+          E: service (line=30)
+            A: {NS}name(0x01010003)="x.app.Guarded" (Raw: "x.app.Guarded")
+            A: {NS}exported(0x01010010)=true
+            A: {NS}permission(0x01010006)="x.app.PERM" (Raw: "x.app.PERM")
+          E: receiver (line=31)
+            A: {NS}name(0x01010003)="x.app.Open" (Raw: "x.app.Open")
+            A: {NS}exported(0x01010010)=true
+"""
+
+
+def test_manifest_flags_and_exposed_components():
+    m = static.manifest_from_xmltree(XMLTREE)
+    assert m.target_sdk == 30 and m.debuggable and m.allow_backup and not m.cleartext
+    exposed = {(c.kind, c.name, c.implicit, c.launcher) for c in m.exposed}
+    assert ("receiver", "x.app.Open", False, False) in exposed
+    assert ("activity", "x.app.Link", True, False) in exposed  # intent filter on target < 31
+    assert ("activity", "x.app.Main", True, True) in exposed
+    assert not any(c.name == "x.app.Guarded" for c in m.exposed)  # has a permission
+    assert m.deep_links == ["https://x.example.net/open"]  # scheme and host from separate <data> merge
+
+
+def test_secrets_found_and_masked():
+    key = "AIza" + "B" * 35
+    pem = "-----BEGIN PRIVATE KEY-----\n" + "A" * 120
+    found = static.secrets({"code": [f"k={key}", "-----BEGIN RSA PRIVATE KEY-----", pem]})
+    kinds = {s.kind for s in found}
+    assert kinds == {"Google API key", "private key"}  # the bare header (a PEM parser's constant) isn't one
+    g = next(s for s in found if s.kind == "Google API key")
+    assert key not in g.masked() and g.masked().startswith("AIzaBBBB")
+
+
+def test_endpoints_drop_doc_and_schema_noise():
+    urls = static.endpoints(
+        [
+            "see https://github.com/x/y and http://schemas.android.com/apk/res/android",
+            "api: https://api.x.net/v1/users?id=1, and https://cdn.x.net.",
+        ]
+    )
+    assert urls == ["https://api.x.net/v1/users?id=1", "https://cdn.x.net"]
+    assert static.hosts(urls) == [("api.x.net", 1), ("cdn.x.net", 1)]
