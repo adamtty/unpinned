@@ -212,7 +212,10 @@ def report_json(r: analyze.Report, show_secrets: bool) -> dict:
 
 
 def recommend(r: analyze.Report) -> str:
-    if r.pinning() == "none" and not r.of("ct") and not r.detects_root:
+    """Nothing pinned: no Frida at all (nothing for root or Frida checks to find, and root on unpinned's emulator is
+    invisible to apps anyway; if the app still refuses, the watcher offers a patch). Pinned and Frida-aware: the
+    gadget, so there's no frida-server to find. Otherwise the hooks."""
+    if r.pinning() == "none" and not r.of("ct"):
         return "ca"
     if r.detects_frida:
         return "gadget"
