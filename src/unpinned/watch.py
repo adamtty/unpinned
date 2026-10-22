@@ -51,10 +51,27 @@ def exit_reason(serial: str, package: str) -> str:
     crash = device.shell(serial, "logcat -d -b crash -t 200", check=False, timeout=30)
     blocks = [b for b in crash.split("FATAL EXCEPTION") if f"Process: {package}" in b]
     if blocks:
-        m = re.search(r"\n[^\n]*?([\w.$]+(?:Exception|Error)[^\n]*)", blocks[-1])
-        if m:
-            parts.append(m.group(1).strip()[:200])
+        cause = crash_cause(blocks[-1])
+        if cause:
+            parts.append(cause)
     return ": ".join(parts)
+
+
+def crash_cause(block: str) -> str:
+    """The exception that ended the app: the last "Caused by:" if there is one, else the thrown exception (the first
+    exception line after "Process:"), not whatever exception text appears first in the block."""
+    lines = [re.sub(r"^.*?\b(?:AndroidRuntime|DEBUG)\s*:\s?", "", ln).strip() for ln in block.splitlines()]
+    caused = [ln.removeprefix("Caused by: ") for ln in lines if ln.startswith("Caused by:")]
+    if caused:
+        return caused[-1][:200]
+    after = False
+    for ln in lines:
+        if ln.startswith("Process:"):
+            after = True
+            continue
+        if after and re.match(r"^[\w.$]+(?:Exception|Error)\b", ln):
+            return ln[:200]
+    return ""
 
 
 def in_front(serial: str, package: str) -> bool:
