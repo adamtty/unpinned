@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from unpinned import analyze, apk, assets, certs, device, env, hooks, intercept, patch, phone, watch
+from unpinned import analyze, apk, assets, certs, device, env, hooks, intercept, patch, phone, static, watch
 
 STRATEGIES = {
     "hooks": "root + Frida hooks: unpinning, root-detection bypass, proxy redirect (the app is untouched)",
@@ -138,6 +138,7 @@ def show_report(r: analyze.Report) -> None:
         for f in found:
             ev = "; ".join(f.evidence[:3])
             print(f"    {MARK[f.strength]} {f.label}  \033[2m{f.strength}{' · ' + ev if ev else ''}\033[0m")
+    show_static(r, getattr(show_report, "show_secrets", False))
     if any("TrustManager" in f.label and "hashing" in f.label for f in r.of("pinning")):
         print(
             "\n  \033[2mA TrustManager that hashes keys itself is app-specific: if a request still fails, open "
@@ -151,6 +152,65 @@ def show_report(r: analyze.Report) -> None:
     print()
 
 
+def show_static(r: analyze.Report, show_secrets: bool = False) -> None:
+    m = r.manifest
+    flags = []
+    if m.debuggable:
+        flags.append("\033[31mdebuggable\033[0m")
+    if m.allow_backup:
+        flags.append("\033[33mallowBackup\033[0m (adb backup can copy its data)")
+    if m.cleartext:
+        flags.append("\033[33mcleartext HTTP allowed\033[0m")
+    exposed = [c for c in m.exposed if not c.launcher]
+    if flags or exposed or m.deep_links:
+        print("\n  \033[1mManifest\033[0m" + (f"  \033[2mtarget SDK {m.target_sdk}\033[0m" if m.target_sdk else ""))
+        if flags:
+            print("    " + " · ".join(flags))
+        for c in exposed[:12]:
+            why = " (implicitly, via an intent filter on an old target SDK)" if c.implicit else ""
+            print(f"    \033[33m●\033[0m exported {c.kind} with no permission: {c.name}{why}")
+        if len(exposed) > 12:
+            print(f"    \033[2m+{len(exposed) - 12} more exported components\033[0m")
+        for link in m.deep_links[:10]:
+            print(f"    ○ deep link: {link}")
+        if len(m.deep_links) > 10:
+            print(f"    \033[2m+{len(m.deep_links) - 10} more deep links\033[0m")
+    if r.secrets:
+        hint = "" if show_secrets else "  \033[2m(masked: --show-secrets)\033[0m"
+        print("\n  \033[1mHard-coded secrets\033[0m" + hint)
+        for sec in r.secrets[:15]:
+            value = sec.value if show_secrets else sec.masked()
+            note = f"  \033[2m{sec.note}\033[0m" if sec.note else ""
+            print(f"    \033[31m●\033[0m {sec.kind}: {value}  \033[2m({sec.where})\033[0m{note}")
+    if r.endpoints:
+        top = static.hosts(r.endpoints)
+        print(f"\n  \033[1mEndpoints\033[0m  \033[2m{len(r.endpoints)} URLs on {len(top)} hosts\033[0m")
+        print("    " + ", ".join(f"{h} ({n})" for h, n in top[:12]) + (" …" if len(top) > 12 else ""))
+
+
+def report_json(r: analyze.Report, show_secrets: bool) -> dict:
+    import dataclasses
+
+    t = r.triage
+    return {
+        "package": t.package,
+        "version": t.version,
+        "min_sdk": t.min_sdk,
+        "target_sdk": t.target_sdk,
+        "abis": t.abis,
+        "frameworks": t.frameworks,
+        "pinning": r.pinning(),
+        "findings": [dataclasses.asdict(f) for f in r.findings],
+        "pin_checks": [c.label() for c in getattr(r, "pin_checks", [])],
+        "manifest": dataclasses.asdict(r.manifest),
+        "secrets": [
+            {"kind": s.kind, "value": s.value if show_secrets else s.masked(), "where": s.where, "note": s.note}
+            for s in r.secrets
+        ],
+        "endpoints": r.endpoints,
+    }
+
+
 def recommend(r: analyze.Report) -> str:
     if r.pinning() == "none" and not r.of("ct") and not r.detects_root:
         return "ca"
@@ -162,7 +222,15 @@ def recommend(r: analyze.Report) -> str:
 def cmd_triage(a) -> int:
     with tempfile.TemporaryDirectory(prefix="unpinned-") as tmp:
         r = analyze.analyze(apk.load(Path(a.app), Path(tmp)))
+        show_report.show_secrets = a.show_secrets
         show_report(r)
+        if a.json:
+            import json
+
+            Path(a.json).write_text(json.dumps(report_json(r, a.show_secrets), indent=2))
+            say(f"wrote {a.json}")
+        if a.endpoints:
+            print("\n".join(r.endpoints))
         say(f"suggested: {recommend(r)} — {STRATEGIES[recommend(r)]}")
     return 0
 
@@ -645,8 +713,11 @@ def build_parser() -> argparse.ArgumentParser:
     s = sub.add_parser("setup", help="download frida-server and the scripts, create the AVD, save a clean snapshot")
     s.add_argument("--headless", action="store_true", help="no emulator window")
     s.set_defaults(fn=cmd_setup)
-    t = sub.add_parser("triage", help="what the app does about pinning, root, Frida and tampering (no device)")
+    t = sub.add_parser("triage", help="pinning, root/Frida checks, manifest, secrets and endpoints (no device)")
     t.add_argument("app")
+    t.add_argument("--show-secrets", action="store_true", help="print secrets in full (masked by default)")
+    t.add_argument("--json", help="write the whole triage to this JSON file")
+    t.add_argument("--endpoints", action="store_true", help="list every URL found")
     t.set_defaults(fn=cmd_triage)
     r = sub.add_parser("run", help="triage, choose a strategy, run it, and patch the app if it refuses a rooted device")
     r.add_argument("app", help=".apk or a bundle (.apks / .xapk / .zip); with --from-phone, a package name or search")
