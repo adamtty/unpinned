@@ -471,7 +471,7 @@ def _run_and_watch(
         outcome = watch.watch(serial, package, seconds=a.watch)
         if outcome.ok:
             return strategy
-        warn(f"the app refused to run ({'still open, showing' if outcome.alive else 'it closed'}: {outcome.reason})")
+        warn(f"the app refused to run: {outcome.reason}")
         options = [(k, STRATEGIES[k]) for k in ("gadget", "apk-mitm") if k not in tried]
         if not options:
             warn("every strategy has been tried: this one needs an app-specific hook (jadx, then --script)")
