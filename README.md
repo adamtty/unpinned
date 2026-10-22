@@ -54,6 +54,10 @@ unpinned run app.apk        # triage → choose → reset → install → unpin 
 
    `unpinned triage APP --json report.json` writes all of it out, and `--endpoints` lists every URL.
 
+   With [apkid](https://github.com/rednaga/APKiD) installed, triage also adds its signature-based findings: packers
+   and protectors (DexGuard, …), obfuscators, emulator / debugger / root checks, anti-disassembly tricks, and the
+   compiler (a `dexlib` build means the app was rebuilt by a tool, often a sign of repackaging).
+
    Known third-party libraries (Cronet, Flutter's engine, crash reporters…) are skipped, so their strings don't
    count against the app.
 
@@ -166,7 +170,7 @@ You need an Apple Silicon Mac, where arm64 Android runs natively, and:
 - **mitmproxy** (`brew install mitmproxy`) and **openssl**
 - **uv**
 - **For patching:** apktool (`brew install apktool`) and a JDK (`keytool`). apk-mitm is optional.
-- **Optional:** scrcpy.
+- **Optional:** scrcpy, and [apkid](https://github.com/rednaga/APKiD) (`uv tool install apkid`) for extra triage.
 
 ```bash
 git clone https://github.com/adamtty/unpinned && cd unpinned
@@ -253,4 +257,4 @@ unpinned is MIT.
 - A container fleet: Redroid on an ARM server, with Tailscale for access.
 - The gadget on Android 16, once Frida's GC fix lands; broader tests of the refuse → patch → reopen loop.
 - Flutter pattern updates, and reFlutter as a fallback.
-- apkid in triage, plus a scrcpy-in-the-browser view.
+- A scrcpy-in-the-browser view.

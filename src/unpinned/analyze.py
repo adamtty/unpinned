@@ -75,6 +75,7 @@ class Report:
     manifest: static.Manifest = field(default_factory=static.Manifest)
     secrets: list[static.Secret] = field(default_factory=list)
     endpoints: list[str] = field(default_factory=list)
+    compilers: list[str] = field(default_factory=list)  # from apkid: dx, d8, r8, dexlib (rebuilt by a tool)
 
     def of(self, *categories: str) -> list[Finding]:
         return [f for f in self.findings if f.category in categories]
@@ -468,7 +469,76 @@ def analyze(apks: list[Path]) -> Report:
             add(Finding(category, label, LIKELY, hits[:4]))
     for label in t.protectors:
         add(Finding("protector", label, LIKELY, ["native library names"]))
+    more, rep.compilers = apkid(apks)
+    rep.findings += more
     return rep
+
+
+# apkid (https://github.com/rednaga/APKiD): known packers, protectors, obfuscators and anti-analysis tricks, by
+# signature. Optional: used when it's installed. Its categories map onto triage's.
+APKID_CATEGORIES = {
+    "anti_vm": ("emulator", LIKELY),
+    "anti_debug": ("anti_debug", LIKELY),
+    "anti_root": ("root", LIKELY),
+    "packer": ("protector", DEFINITE),
+    "protector": ("protector", DEFINITE),
+    "obfuscator": ("obfuscation", LIKELY),
+    "anti_disassembly": ("anti_analysis", LIKELY),
+    "abnormal": ("anti_analysis", POSSIBLE),
+    "manipulator": ("tampering", LIKELY),
+}
+
+
+def apkid(apks: list[Path]) -> tuple[list[Finding], list[str]]:
+    """Run apkid over the APKs. → (findings, compilers seen); ([], []) when apkid isn't installed or fails."""
+    import json
+    import shutil
+
+    tool = shutil.which("apkid")
+    if not tool:
+        return [], []
+    found: dict[tuple[str, str], set[str]] = {}
+    compilers: set[str] = set()
+    for a in apks:
+        try:
+            r = subprocess.run(
+                [tool, "-j", "-t", "120", str(a)], capture_output=True, text=True, timeout=600, check=False
+            )
+            data = json.loads(r.stdout or "{}")
+        except (subprocess.TimeoutExpired, ValueError, RecursionError):
+            continue
+        for f in data.get("files", []) if isinstance(data, dict) else []:
+            if not isinstance(f, dict) or not isinstance(f.get("matches"), dict):
+                continue
+            where = str(f.get("filename", "")).split("!", 1)[-1].rsplit("/", 1)[-1][:60]
+            for category, labels in f["matches"].items():
+                for label in labels if isinstance(labels, list) else []:
+                    label = str(label)[:80]
+                    if category == "compiler":
+                        if "unknown" not in label:
+                            compilers.add(label)
+                    elif category in APKID_CATEGORIES:
+                        found.setdefault((category, label), set()).add(where)
+    findings = []
+    named = {"packer", "protector", "obfuscator", "manipulator"}  # the name is the finding: one line each
+    grouped: dict[str, list[str]] = {}
+    for (category, label), wheres in sorted(found.items()):
+        ours, strength = APKID_CATEGORIES[category]
+        if category in named:
+            findings.append(Finding(ours, f"{label} (apkid)", strength, sorted(wheres)[:4]))
+        else:
+            grouped.setdefault(category, []).append(label)
+    descriptions = {
+        "anti_vm": "emulator checks",
+        "anti_debug": "debugger checks",
+        "anti_root": "root checks",
+        "anti_disassembly": "anti-disassembly tricks",
+        "abnormal": "unusual structure",
+    }
+    for category, labels in grouped.items():
+        ours, strength = APKID_CATEGORIES[category]
+        findings.append(Finding(ours, f"{descriptions.get(category, category)} (apkid)", strength, labels[:8]))
+    return findings, sorted(compilers)
 
 
 def _java(descriptor: str) -> str:

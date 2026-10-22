@@ -532,3 +532,46 @@ E AndroidRuntime: 	... android.content.pm.PackageManager$NameNotFoundException: 
     assert watch.crash_cause(block + "E AndroidRuntime: Caused by: java.lang.SecurityException: nope\n") == (
         "java.lang.SecurityException: nope"
     )
+
+
+def test_apkid_findings_map_onto_triage(monkeypatch, tmp_path):
+    import json
+    import shutil
+    import subprocess
+
+    from unpinned import analyze
+
+    out = {
+        "files": [
+            {
+                "filename": "x.apk!classes.dex",
+                "matches": {
+                    "anti_vm": ["Build.MODEL check", "Build.TAGS check"],
+                    "anti_debug": ["Debug.isDebuggerConnected() check"],
+                    "compiler": ["r8"],
+                },
+            },
+            {"filename": "x.apk!lib/arm64-v8a/libtool-checker.so", "matches": {"anti_root": ["RootBeer"]}},
+            {
+                "filename": "x.apk",
+                "matches": {"packer": ["DexGuard"], "compiler": ["unknown (please file detection issue!)"]},
+            },
+        ]
+    }
+    monkeypatch.setattr(shutil, "which", lambda name: "/usr/bin/apkid" if name == "apkid" else None)
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, json.dumps(out), ""))
+    findings, compilers = analyze.apkid([tmp_path / "x.apk"])
+    by = {(f.category, f.label): f for f in findings}
+    assert compilers == ["r8"]  # "unknown" compilers dropped
+    assert by[("emulator", "emulator checks (apkid)")].evidence == ["Build.MODEL check", "Build.TAGS check"]
+    assert ("anti_debug", "debugger checks (apkid)") in by and ("root", "root checks (apkid)") in by
+    assert by[("protector", "DexGuard (apkid)")].strength == analyze.DEFINITE
+
+
+def test_apkid_is_optional(monkeypatch, tmp_path):
+    import shutil
+
+    from unpinned import analyze
+
+    monkeypatch.setattr(shutil, "which", lambda name: None)
+    assert analyze.apkid([tmp_path / "x.apk"]) == ([], [])

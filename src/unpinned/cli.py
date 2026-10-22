@@ -62,6 +62,7 @@ def cmd_doctor(a) -> int:
         ("npm (for gadget patching)", shutil.which("npm")),
         ("scrcpy (optional)", shutil.which("scrcpy")),
         ("apk-mitm (optional)", shutil.which("apk-mitm")),
+        ("apkid (optional, for triage)", shutil.which("apkid")),
         (
             f"Android {a.api} Google APIs arm64 image",
             str(device.image_dir(a.api)) if device.image_dir(a.api).is_dir() else None,
@@ -112,6 +113,9 @@ TITLES = {
     "emulator": "Emulator detection",
     "anti_debug": "Debugger detection",
     "protector": "Protector / RASP",
+    "obfuscation": "Obfuscation",
+    "anti_analysis": "Anti-analysis",
+    "tampering": "Signs of repackaging",
 }
 
 
@@ -130,7 +134,10 @@ def show_report(r: analyze.Report) -> None:
         f"{t.package} {t.version}  (min SDK {t.min_sdk or '?'}, target {t.target_sdk or '?'}, "
         f"{len(t.apks)} APK{'s' if len(t.apks) != 1 else ''})"
     )
-    say(f"native: {', '.join(t.abis) or 'none'}  ·  framework: {', '.join(t.frameworks) or 'Java / Kotlin'}")
+    built = f"  ·  built with {', '.join(r.compilers)}" if r.compilers else ""
+    say(f"native: {', '.join(t.abis) or 'none'}  ·  framework: {', '.join(t.frameworks) or 'Java / Kotlin'}{built}")
+    if any(c.startswith("dexlib") for c in r.compilers):
+        warn("built with dexlib: the app was rebuilt by a tool (smali/apktool), which often means it's been repackaged")
     for w in t.warnings():
         warn(w)
     verdict = {
