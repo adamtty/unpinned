@@ -18,6 +18,8 @@
 > **Work in progress.** unpinned is a young, Mac-first proof of concept. The core flow works and is tested against
 > a pinning demo app, but expect rough edges, changing commands, and the [known issues](#known-issues) below.
 
+**New here? The [user guide](USER_GUIDE.md) covers everything in depth.**
+
 A self-hosted start on "Corellium for Android", for **authorised** mobile app security testing: bug bounties in
 scope, your own apps, or apps you have permission to assess.
 
