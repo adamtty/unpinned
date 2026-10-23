@@ -617,3 +617,13 @@ def test_only_emudhra_roots_are_dropped(tmp_path, monkeypatch):
         assert len(trust.context().get_ca_certs()) == 1
     finally:
         trust.context.cache_clear()
+
+
+def test_snapshot_errors_name_the_emulator_to_rebuild(monkeypatch):
+    from unpinned import env
+
+    assert device.setup_command(env.DEFAULT_API) == "unpinned setup"
+    assert device.setup_command("34") == "unpinned --api 34 setup"
+    monkeypatch.setattr(device, "adb", lambda *a, **k: "KO: snapshot load failed")
+    with pytest.raises(device.DeviceError, match=r"Android 34 .*`unpinned --api 34 setup`"):
+        device.reset("emulator-5556", "34")

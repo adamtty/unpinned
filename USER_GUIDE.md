@@ -140,7 +140,9 @@ uv run unpinned --api 34 setup        # Android 14, for gadget work
 ### When to run `setup` again
 
 - **After the Android emulator updates.** Snapshots are tied to the emulator version. If `run` says the clean
-  snapshot won't load, that's why: run `setup` again.
+  snapshot won't load, that's why: run `setup` again. **Each Android version has its own emulator and snapshot**,
+  so rebuild every one you use: `unpinned setup` (Android 16) and `unpinned --api 34 setup` (Android 14, which the
+  gadget switches to).
 - **After upgrading unpinned**, if its notes say the snapshot needs rebuilding.
 - **If the emulator is in a bad state.** `setup` rebuilds it from scratch.
 
@@ -703,7 +705,7 @@ against GitHub's published SHA-256. On devices where it won't run, it uses 17.5.
 | Symptom | Cause | Fix |
 |---|---|---|
 | `no clean snapshot yet` | `setup` hasn't been run for this Android version | `unpinned setup` (or `--api 34 setup`) |
-| `the clean snapshot wouldn't load` | the emulator was updated; snapshots are tied to its version | `unpinned setup` again |
+| `the clean snapshot … wouldn't load` | the emulator was updated; snapshots are tied to its version | `setup` again **for the Android version it names**: `unpinned setup` for 16, `unpinned --api 34 setup` for 14 (the gadget switches to 14). Each version has its own snapshot |
 | `the Android … Google APIs arm64 image isn't installed` | no system image | the `sdkmanager` command it prints |
 | An app's first requests fail with `UnknownHostException` | the emulator's network wasn't back yet after the snapshot loaded | unpinned waits for it now; if it persists, `reset` and try again |
 | mitmweb shows `Certificate verify failed` against the real server | the server's certificate doesn't verify (staging, self-signed, or a root mitmproxy doesn't know) | `--insecure-upstream` |

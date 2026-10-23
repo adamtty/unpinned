@@ -76,7 +76,7 @@ def cmd_doctor(a) -> int:
         ok &= bool(val) or "optional" in name
         print(f"  {mark} {name}: {val or 'missing'}")
     if not device.has_snapshot(a.api):
-        print("\n  run `unpinned setup` to create the AVD and its clean snapshot")
+        print(f"\n  run `{device.setup_command(a.api)}` to create the AVD and its clean snapshot")
     return 0 if ok else 1
 
 
@@ -562,7 +562,7 @@ def cmd_pull(a) -> int:
 
 def cmd_run(a) -> int:
     if not device.has_snapshot(a.api):
-        warn("no clean snapshot yet: run `unpinned setup` first")
+        warn(f"no clean snapshot yet: run `{device.setup_command(a.api)}` first")
         return 1
     run_dir = Path(tempfile.mkdtemp(prefix="run-", dir=env.home()))
     original = _from_phone(a, run_dir) if a.from_phone else Path(a.app)
@@ -587,14 +587,14 @@ def cmd_run(a) -> int:
     serial = device.running(a.api)
     if serial:
         say(f"resetting {serial} to the clean snapshot")
-        device.reset(serial)
+        device.reset(serial, a.api)
     else:
         say("booting from the clean snapshot")
         serial = device.boot(a.api, window=not a.headless)
 
     host, port, url, config = _setup_proxy(a, serial, own, run_dir)
     if strategy == "gadget" and not device.uses_cc_gc(serial):
-        warn("this snapshot predates the garbage-collector switch: run `unpinned setup` again")
+        warn(f"this snapshot predates the garbage-collector switch: run `{device.setup_command(a.api)}` again")
     if strategy in ("gadget", "apk-mitm"):
         apks = _patch(strategy, original, package, config, run_dir, a.api, [Path(x) for x in a.script or []])
     if not a.headless:
@@ -729,7 +729,7 @@ def cmd_reset(a) -> int:
     if not serial:
         warn("the unpinned emulator isn't running")
         return 1
-    device.reset(serial)
+    device.reset(serial, a.api)
     say("back to the clean snapshot")
     return 0
 
