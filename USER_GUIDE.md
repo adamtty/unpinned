@@ -181,8 +181,8 @@ Then each kind of finding, marked ● definite, ● likely or ○ possible, with
 | **Hard-coded secrets** | Google API keys, Firebase database URLs, AWS access keys, private keys, Slack / Stripe live / GitHub tokens, JWTs |
 | **Endpoints** | every URL in the code, resources and assets, by host |
 
-Known third-party libraries (OkHttp, AndroidX, Google, Chromium/Cronet, Flutter's engine, crash reporters, RASP
-SDKs, …) are skipped where it matters, so their code doesn't count as the app's.
+Known third-party libraries (OkHttp, AndroidX, Google, Huawei's HMS, Chromium/Cronet, Flutter's engine, crash
+reporters, RASP SDKs, …) are skipped where it matters, so their code doesn't count as the app's.
 
 ### The app's own certificate checks
 
