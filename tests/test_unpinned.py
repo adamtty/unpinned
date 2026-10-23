@@ -627,3 +627,11 @@ def test_snapshot_errors_name_the_emulator_to_rebuild(monkeypatch):
     monkeypatch.setattr(device, "adb", lambda *a, **k: "KO: snapshot load failed")
     with pytest.raises(device.DeviceError, match=r"Android 34 .*`unpinned --api 34 setup`"):
         device.reset("emulator-5556", "34")
+
+
+def test_sdk_code_isnt_counted_as_the_apps_own():
+    from unpinned import analyze
+
+    for sdk in ("Lcom/huawei/agconnect/credential/obs/ag;", "Lcom/huawei/hms/analytics/core/transport/net/e;"):
+        assert sdk.startswith(analyze.LIBRARY_PREFIXES)  # MyTV+ offered 41 "own" checks, nearly all Huawei's
+    assert not "Lcom/ngc/FastTvLitePlus/d1/g;".startswith(analyze.LIBRARY_PREFIXES)

@@ -48,6 +48,7 @@ LIBRARY_PREFIXES = (
     "Lcom/bumptech/",
     "Lcom/fasterxml/",
     "Lcom/amazon/",
+    "Lcom/huawei/",  # HMS Core and AppGallery Connect: their own TLS stack, in many apps outside China too
     # protectors / RASP SDKs: their certificate checks guard the app's own integrity, never something to hook
     "Lapp/talsec/",
     "Lcom/aheaditec/talsec",
