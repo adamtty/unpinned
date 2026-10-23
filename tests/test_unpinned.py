@@ -838,3 +838,20 @@ def test_watcher_spots_proxy_refusals():
     assert watch.REFUSAL_RE.search(vpn) and not watch.Outcome(True, vpn, refused=True).proxy
     assert not watch.Outcome(True, "it's showing: Root detected", refused=True).proxy
     assert not watch.Outcome(True).proxy
+
+
+def test_waiting_survives_a_stalled_adb(monkeypatch):
+    calls = []
+
+    def shell(serial, cmd, check=True, timeout=None):
+        calls.append(cmd)
+        if len(calls) == 1:
+            raise device.DeviceError(f"adb shell {cmd} timed out after 10s")
+        return "ok" if "ping" in cmd else "1"
+
+    monkeypatch.setattr(device, "shell", shell)
+    monkeypatch.setattr(device.time, "sleep", lambda s: None)
+    assert device.wait_network("emulator-5554", timeout=30)
+    calls.clear()
+    device.wait_booted("emulator-5554", timeout=30)
+    assert len(calls) == 2

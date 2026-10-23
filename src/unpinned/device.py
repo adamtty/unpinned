@@ -157,8 +157,11 @@ def boot(api: str, cold: bool = False, window: bool = True) -> str:
 def wait_booted(serial: str, timeout: float = BOOT_TIMEOUT) -> None:
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if shell(serial, "getprop sys.boot_completed", check=False, timeout=10).strip() == "1":
-            return
+        try:
+            if shell(serial, "getprop sys.boot_completed", check=False, timeout=10).strip() == "1":
+                return
+        except DeviceError:
+            pass  # adb itself can stall while the device boots: keep waiting
         time.sleep(1)
     raise DeviceError(f"{serial} didn't finish booting within {timeout:.0f}s")
 
@@ -262,8 +265,11 @@ def wait_network(serial: str, timeout: float = 30) -> bool:
     fails its first direct (unproxied) connections. → whether DNS worked in time."""
     deadline = time.monotonic() + timeout
     while time.monotonic() < deadline:
-        if "ok" in shell(serial, "ping -c1 -W2 dns.google >/dev/null 2>&1 && echo ok", check=False, timeout=10):
-            return True
+        try:
+            if "ok" in shell(serial, "ping -c1 -W2 dns.google >/dev/null 2>&1 && echo ok", check=False, timeout=10):
+                return True
+        except DeviceError:
+            pass  # adb itself can stall while the device settles: keep waiting
         time.sleep(1)
     return False
 
