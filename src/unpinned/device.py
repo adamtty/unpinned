@@ -256,13 +256,18 @@ def wait_network(serial: str, timeout: float = 30) -> bool:
     return False
 
 
-def reset(serial: str) -> None:
+def setup_command(api: str) -> str:
+    return "unpinned setup" if api == env.DEFAULT_API else f"unpinned --api {api} setup"
+
+
+def reset(serial: str, api: str = env.DEFAULT_API) -> None:
     """Back to the clean snapshot: no apps, no data, nothing from the last run."""
     out = adb("emu", "avd", "snapshot", "load", env.SNAPSHOT, serial=serial, timeout=300)
     if "KO" in out:
         raise DeviceError(
-            "the clean snapshot wouldn't load. Snapshots are tied to the emulator version, so this usually means "
-            "the emulator was updated: run `unpinned setup` again to rebuild it"
+            f"the clean snapshot of the Android {api} emulator wouldn't load. Snapshots are tied to the emulator "
+            "version, so this usually means the emulator was updated: rebuild it with "
+            f"`{setup_command(api)}` (each Android version's emulator has its own snapshot)"
         )
     wait_booted(serial)
     wait_network(serial)
