@@ -15,7 +15,7 @@ from pathlib import Path
 
 import frida
 
-from unpinned import env
+from unpinned import env, trust
 
 SCRIPTS_REPO = "httptoolkit/frida-interception-and-unpinning"
 SCRIPTS_COMMIT = "560dd29d410fe785f9f390e3c7f86ca8359c8d67"
@@ -44,7 +44,7 @@ def _get(url: str, limit: int = MAX_DOWNLOAD, accept: str | None = None) -> byte
     req = urllib.request.Request(  # noqa: S310 - https only, checked above
         url, headers={"User-Agent": "unpinned", **({"Accept": accept} if accept else {})}
     )
-    with urllib.request.urlopen(req, timeout=120) as r:  # noqa: S310 - https only, checked above
+    with urllib.request.urlopen(req, timeout=120, context=trust.context()) as r:  # noqa: S310 - https only, checked above
         data = r.read(limit + 1)
     if len(data) > limit:
         raise AssetError(f"{url} is larger than {limit // (1024 * 1024)} MB")

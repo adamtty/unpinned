@@ -1,11 +1,12 @@
 """The parts that don't need a device: reading APKs and bundles, triage, config rendering, ports, the frida command."""
 
 import socket
+import ssl
 import zipfile
 
 import pytest
 
-from unpinned import apk, assets, device, env, intercept
+from unpinned import apk, assets, device, env, intercept, trust
 
 PEM = "-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----"
 TEMPLATE = """const CERT_PEM = `-----BEGIN CERTIFICATE-----
@@ -575,3 +576,29 @@ def test_apkid_is_optional(monkeypatch, tmp_path):
 
     monkeypatch.setattr(shutil, "which", lambda name: None)
     assert analyze.apkid([tmp_path / "x.apk"]) == ([], [])
+
+
+def test_downloads_trust_the_default_roots_but_not_emudhra(monkeypatch):
+    monkeypatch.delenv("SSL_CERT_FILE", raising=False)
+    trust.context.cache_clear()
+    ctx = trust.context()
+    names = [str(c.get("subject")) for c in ctx.get_ca_certs()]
+    assert len(names) > 100 and ctx.check_hostname
+    assert not [n for n in names if "eMudhra" in n or "emSign" in n or "AAA Certificate" in n]
+
+
+def test_only_emudhra_roots_are_dropped(tmp_path, monkeypatch):
+    pems = trust.PEM_RE.findall(trust.default_bundle())
+    emudhra = [p for p in pems if trust.distrusted(p)]
+    if not emudhra:
+        pytest.skip("this machine's default roots have no eMudhra root")
+    ders = [ssl.PEM_cert_to_DER_cert(p) for p in emudhra]
+    assert all(b"emSign" in d or b"AAA Certificate" in d for d in ders)
+    bundle = tmp_path / "corp.pem"
+    bundle.write_text("\n".join([next(p for p in pems if not trust.distrusted(p)), *emudhra]))
+    monkeypatch.setenv("SSL_CERT_FILE", str(bundle))  # honoured, and filtered too
+    trust.context.cache_clear()
+    try:
+        assert len(trust.context().get_ca_certs()) == 1
+    finally:
+        trust.context.cache_clear()
