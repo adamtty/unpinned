@@ -102,6 +102,7 @@ uv tool install --editable .    # then just: unpinned run app.apk
 | a JDK *(for patching)* | `keytool`, to make the signing key | `brew install openjdk` |
 | scrcpy *(optional)* | the phone/emulator screen on your Mac | `brew install scrcpy` |
 | apk-mitm *(optional)* | the apk-mitm patch | `npm install -g apk-mitm` |
+| apkid *(optional)* | extra triage findings: packers, protectors, obfuscators, compilers ([section 5](#apkid-optional)) | `uv tool install apkid` |
 
 **Use a Google APIs image, not a "Google Play" one.** Play Store images can't be rooted, and unpinned needs root on
 the emulator. Android 16 (`android-36.1`) is the default. Android 14 (`android-34`) is worth having too, because the
@@ -173,6 +174,7 @@ Then each kind of finding, marked ● definite, ● likely or ○ possible, with
 | **Emulator detection** | emulator property and hardware names |
 | **Debugger detection** | `isDebuggerConnected`, `TracerPid` |
 | **Protector / RASP** | Talsec freeRASP, Promon SHIELD, Jiagu, Bangcle / SecNeo, Tencent Legu, Appdome, DexProtector, and tamper-check libraries |
+| **Obfuscation**, **Anti-analysis**, **Signs of repackaging** | only with apkid installed ([below](#apkid-optional)) |
 | **Manifest** | `debuggable`; `allowBackup`; cleartext HTTP; exported activities, services, receivers and providers with no permission guarding them (including implicit exports on old target SDKs); deep links |
 | **Hard-coded secrets** | Google API keys, Firebase database URLs, AWS access keys, private keys, Slack / Stripe live / GitHub tokens, JWTs |
 | **Endpoints** | every URL in the code, resources and assets, by host |
@@ -215,6 +217,52 @@ Google API key's restrictions, check a Firebase database's rules.
 If triage finds a runtime protector (RASP), it says so plainly, with what works best: a real phone with root
 hidden, or on an authorised test a build with the protection in development mode or your device allowlisted. See
 [section 17](#17-limits-what-unpinned-cant-do).
+
+### apkid (optional)
+
+[apkid](https://github.com/rednaga/APKiD) recognises packers, protectors, obfuscators, anti-analysis tricks and the
+compiler that built each DEX file, by signature (YARA rules). Triage works without it. With it installed, every
+triage (and the report at the start of `run` and `phone`) runs it too, and adds what it finds to the same report,
+marked **(apkid)**.
+
+```bash
+uv tool install apkid
+uv run unpinned doctor        # shows "apkid (optional, for triage)" as ✓
+```
+
+How its findings show up:
+
+| apkid category | Shown under | Strength | Shown as |
+|---|---|---|---|
+| `packer`, `protector` | Protector / RASP | ● definite | one line per name, with the files it was found in (for example `DexProtector (apkid)`) |
+| `obfuscator` | Obfuscation | ● likely | one line per name |
+| `manipulator` | Signs of repackaging | ● likely | one line per name |
+| `anti_root` | Root detection | ● likely | "root checks (apkid)", with apkid's labels as the evidence |
+| `anti_vm` | Emulator detection | ● likely | "emulator checks (apkid)" |
+| `anti_debug` | Debugger detection | ● likely | "debugger checks (apkid)" |
+| `anti_disassembly` | Anti-analysis | ● likely | "anti-disassembly tricks (apkid)" |
+| `abnormal` | Anti-analysis | ○ possible | "unusual structure (apkid)" |
+
+**The compiler** goes on the report's second line: `built with r8` (or `dx`, `d8`, `r8 without marker`, …). If it
+says **dexlib**, the DEX was rebuilt by a tool such as apktool or smali rather than by Google's compilers, and
+triage warns you: the app has probably been repackaged by someone, which is worth knowing before you trust what you
+see.
+
+What it changes:
+
+- **A packer or protector counts as a protector.** You get the plain advice from [Protected apps](#protected-apps),
+  and the watcher waits 60 seconds instead of 20 after launch, since protectors act after their background checks.
+- **None of it changes the recommended strategy**, which goes by pinning and Frida detection. The rest tells you
+  what you'll find when you open the app in jadx.
+- **`--json` includes them**, like every other finding.
+
+Notes:
+
+- It adds a few seconds per APK (apkid gives up on a file after two minutes). A split app (`.apks`, `.xapk`) is
+  checked APK by APK.
+- If apkid is missing, times out or prints something unexpected, triage simply goes on without it.
+- Signatures only know what they've been taught: a protector apkid doesn't recognise can still be there, and
+  triage's own checks (native library names, RASP SDK classes) look for those separately.
 
 ## 6. Choosing how to get at the traffic
 
