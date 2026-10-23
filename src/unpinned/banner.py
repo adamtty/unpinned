@@ -33,7 +33,7 @@ def render(color: bool = True) -> str:
         lines = [f"\033[38;5;{c}m{line}\033[0m" for line, c in zip(lines, HEAT, strict=True)]
     tagline = f"drop in an APK, get its traffic  ·  v{version()}"
     lines.append(f"\033[2m{tagline:>{WIDTH}}\033[0m" if color else f"{tagline:>{WIDTH}}")
-    return "\n".join(lines) + "\n"
+    return "\n" + "\n".join(lines) + "\n"  # a blank line above, clear of the command that started it
 
 
 def show() -> None:

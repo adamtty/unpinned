@@ -8,8 +8,7 @@ import zipfile
 
 import pytest
 
-from unpinned import apk, assets, device, env, intercept, trust
-from unpinned import apk, assets, banner, device, env, intercept
+from unpinned import apk, assets, banner, device, env, intercept, trust
 
 PEM = "-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----"
 TEMPLATE = """const CERT_PEM = `-----BEGIN CERTIFICATE-----
@@ -791,6 +790,8 @@ def test_strategy_flag_skips_the_question(monkeypatch):
     a = cli.build_parser().parse_args(["run", "app.apk"])
     monkeypatch.setattr("builtins.input", lambda *_: "")  # no flag: asked, and Enter takes the recommendation
     assert cli.pick_strategy(a, "gadget") == "gadget"
+
+
 def test_banner_lines_line_up_and_take_their_colours():
     lines = banner.WORDMARK.splitlines()
     assert len(lines) == len(banner.HEAT) and banner.WIDTH <= 80
