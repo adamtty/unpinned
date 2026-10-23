@@ -406,6 +406,7 @@ uv run unpinned run --from-phone spotify
 | `--script hook.js` | load your own Frida script after the built-in hooks (repeatable; also bundled into gadget builds) |
 | `--no-auto-hooks` | don't hook the app's own certificate checks |
 | `--global-proxy` | without Frida, use the device-wide proxy setting instead of redirecting only the app |
+| `--hide-proxy` | with Frida (`hooks`, `gadget`), don't tell the app there's a proxy: for apps that refuse to run behind one ([more](#apps-that-refuse-a-proxy)) |
 | `--headless` | no windows: neither the emulator's own nor scrcpy |
 | `--api 34` | use the Android 14 emulator (any version you've run `setup` for) |
 
@@ -523,6 +524,7 @@ their background checks). The app has **refused** if:
 - **it's showing** text about root, tampering, Frida, an emulator, integrity or a debugger, or one of Google Play's
   licence-check dialogs ([Google Play automatic protection](#google-play-automatic-protection))
 - **it closed its window** but kept its process (some Frida checks do this)
+- **it's showing** text about a proxy or a VPN (*"This app cannot be used while a proxy is enabled"*)
 
 With each refusal, unpinned quotes **the app's own log line** when there is one, e.g.
 *"it closed its window; the app logged: FRIDA Server DETECTED"*.
@@ -530,6 +532,23 @@ With each refusal, unpinned quotes **the app's own log line** when there is one,
 Then it offers the next method: the **gadget** patch, then **apk-mitm**, reinstalling and reopening each time.
 `--yes` takes them in order without asking. On the phone, each reinstall is confirmed first. Apps with Google
 Play's licence check are the exception: a patched copy fails it, so unpinned says why the app refused and stops there.
+
+### Apps that refuse a proxy
+
+With Frida, unpinned gets the traffic two ways at once. It **tells the app about the proxy**: the JVM's
+`http.proxyHost`, `ConnectivityManager.getDefaultProxy()` and every `ProxySelector` return mitmweb (HTTP Toolkit's
+`android-proxy-override.js`). It also **redirects every socket the app opens** to the proxy, below Java
+(`native-connect-hook.js`). The first is only a courtesy, and it's exactly what an app checks before saying *"This
+app cannot be used while a proxy is enabled"*.
+
+`--hide-proxy` leaves the courtesy out. The app's proxy settings look untouched, and its connections still land in
+mitmweb through the socket redirect. When the watcher sees a proxy or VPN refusal under `hooks` or `gadget`, it
+offers this first: *"It spotted the proxy. Reopen it with the proxy hidden?"*. For `hooks` that just respawns the
+app; for the gadget it re-patches without the override. `ca` and `apk-mitm` never set a proxy for the app to find
+(they redirect with iptables), unless you add `--global-proxy`.
+
+A VPN check is different: Frida doesn't set up a VPN, so an app that refuses because of one is seeing something
+on the device itself.
 
 ### Gadget and Android 16
 
@@ -631,6 +650,9 @@ check*). Install it from Play on your phone, then `phone <name> --strategy hooks
 **An app with runtime protection (RASP).** Expect to lose on the emulator. Try `phone` with root hidden; on an
 authorised test, ask for a build with the protection in development mode.
 
+**An app that says it can't be used while a proxy is enabled.** Add `--hide-proxy` (or say yes when the watcher
+offers it).
+
 **A staging server with a self-signed certificate.** Add `--insecure-upstream`.
 
 **Testing through Burp.** `run app.apk --proxy 127.0.0.1:8080 --ca ~/Downloads/cacert.der`, with Burp's listener
@@ -658,10 +680,10 @@ package name or part of one.
 | `doctor` | checks the tools, the system image, the emulator and its snapshot | |
 | `setup` | downloads and verifies frida-server and the hooks; creates, roots and snapshots the emulator | `--headless` |
 | `triage APP` | the static report, no device | `--show-secrets`, `--json FILE`, `--endpoints` |
-| `run APP` | triage → method → proxy → emulator → watch → patch loop | `--from-phone`, `--device`, `--strategy`, `--yes`, `--watch`, `--proxy`, `--ca`, `--script`, `--no-auto-hooks`, `--insecure-upstream`, `--global-proxy`, `--headless` |
+| `run APP` | triage → method → proxy → emulator → watch → patch loop | `--from-phone`, `--device`, `--strategy`, `--yes`, `--watch`, `--proxy`, `--ca`, `--script`, `--no-auto-hooks`, `--insecure-upstream`, `--global-proxy`, `--hide-proxy`, `--headless` |
 | `phone APP` | the same on a rooted phone | as `run` (without `--from-phone`), plus `--no-hide-root`, `--cleanup`, `--restore BUNDLE` |
 | `pull APP` | an installed app off the phone into one `.apks` | `--device`, `--out DIR` |
-| `patch APP` | write a patched APK | `--method gadget\|apk-mitm`, `--proxy`, `--ca`, `--out DIR` |
+| `patch APP` | write a patched APK | `--method gadget\|apk-mitm`, `--proxy`, `--ca`, `--hide-proxy`, `--out DIR` |
 | `reset` | the running emulator back to its clean snapshot | |
 | `stop` | stop every unpinned emulator, Frida, mitmweb and scrcpy | |
 

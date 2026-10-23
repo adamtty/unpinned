@@ -31,6 +31,10 @@ SCRIPTS = {
     "android/android-disable-flutter-certificate-pinning.js": "fbf60f2d3c4878fe4829e460c553636c52e71c8bed86cad74348def8d220198d",
     "android/android-disable-root-detection.js": "69888dc57c8ac988d7326c507f91d1bb8532cbbaf12a9bbbe0a444655de7fc10",
 }
+# Tells the app a proxy is set (JVM properties, ConnectivityManager, ProxySelector) so it routes through it politely.
+# native-connect-hook.js already redirects every socket underneath, so leaving this out hides the proxy from apps that
+# refuse to run behind one, and the traffic still arrives.
+PROXY_OVERRIDE = "android/android-proxy-override.js"
 MAX_DOWNLOAD = 200 * 1024 * 1024
 
 
@@ -67,6 +71,11 @@ def _sha256(data: bytes) -> str:
 
 def scripts_dir() -> Path:
     return env.home() / "scripts" / SCRIPTS_COMMIT[:12]
+
+
+def hook_scripts(hide_proxy: bool = False) -> list[str]:
+    """The hooks to load after config.js, in order."""
+    return [rel for rel in SCRIPTS if rel != "config.js" and not (hide_proxy and rel == PROXY_OVERRIDE)]
 
 
 def ensure_scripts() -> Path:

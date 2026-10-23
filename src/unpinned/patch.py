@@ -162,7 +162,7 @@ Java.perform(() => {
 """
 
 
-def gadget_script(config_js: str, extra: list[str] | None = None) -> str:
+def gadget_script(config_js: str, extra: list[str] | None = None, hide_proxy: bool = False) -> str:
     """config.js + every hook as one plain script for the gadget, preceded by the Java bridge (Frida 17's gadget has
     none built in). The bridge is the exact build frida-tools ships, the one the frida-server path loads too."""
     import frida_tools
@@ -170,7 +170,7 @@ def gadget_script(config_js: str, extra: list[str] | None = None) -> str:
     bridge = (Path(frida_tools.__file__).parent / "bridges" / "java.js").read_text(encoding="utf-8")
     d = assets.ensure_scripts()
     hooks = "\n;\n".join(
-        [config_js] + [(d / rel).read_text() for rel in assets.SCRIPTS if rel != "config.js"] + list(extra or [])
+        [config_js] + [(d / rel).read_text() for rel in assets.hook_scripts(hide_proxy)] + list(extra or [])
     )
     return bridge + "\n;\n" + GADGET_PRELUDE + "function unpinnedHooks() {\n" + hooks + "\n}\n" + GADGET_START
 
@@ -321,7 +321,14 @@ def _find_smali(decoded: Path, cls: str, package: str) -> Path:
     raise PatchError(f"couldn't find {cls} in the decoded app")
 
 
-def gadget(apks: list[Path], package: str, config_js: str, workdir: Path, extra: list[str] | None = None) -> list[Path]:
+def gadget(
+    apks: list[Path],
+    package: str,
+    config_js: str,
+    workdir: Path,
+    extra: list[str] | None = None,
+    hide_proxy: bool = False,
+) -> list[Path]:
     """Patch the base APK with the gadget and the bundled hooks; re-sign every APK of the set with one key."""
     apktool = _need("apktool", "brew install apktool")
     base = apk.base_apk(apks)
@@ -342,7 +349,7 @@ def gadget(apks: list[Path], package: str, config_js: str, workdir: Path, extra:
     (lib / f"lib{GADGET}.config.so").write_text(
         json.dumps({"interaction": {"type": "script", "path": f"lib{GADGET}.script.so", "on_change": "ignore"}})
     )
-    (lib / f"lib{GADGET}.script.so").write_text(gadget_script(config_js, extra))
+    (lib / f"lib{GADGET}.script.so").write_text(gadget_script(config_js, extra, hide_proxy))
 
     unsigned = workdir / "unsigned.apk"
     _run([apktool, "b", "-o", str(unsigned), str(decoded)])
