@@ -72,7 +72,7 @@ uv run unpinned run app.apk     # triage → choose → run → watch
 `run` asks a few questions (how to get at the traffic, which proxy). Press Enter to take the recommendation each
 time. When it's done:
 
-- the **emulator window** or **scrcpy window** shows the app: click and type in it normally
+- the **emulator window** (or **scrcpy**, on a phone) shows the app: click and type in it normally
 - the **mitmweb link** it prints shows every request and response, decrypted
 - with the Frida hooks, it offers a **Frida REPL** inside the app
 
@@ -100,7 +100,7 @@ uv tool install --editable .    # then just: unpinned run app.apk
 | **uv** | runs unpinned and pins its Python dependencies | `brew install uv` |
 | apktool *(for patching)* | the gadget patch | `brew install apktool` |
 | a JDK *(for patching)* | `keytool`, to make the signing key | `brew install openjdk` |
-| scrcpy *(optional)* | the phone/emulator screen on your Mac | `brew install scrcpy` |
+| scrcpy *(optional)* | the phone's screen on your Mac (the emulator has its own window) | `brew install scrcpy` |
 | apk-mitm *(optional)* | the apk-mitm patch | `npm install -g apk-mitm` |
 | apkid *(optional)* | extra triage findings: packers, protectors, obfuscators, compilers ([section 5](#apkid-optional)) | `uv tool install apkid` |
 
@@ -381,7 +381,7 @@ uv run unpinned run --from-phone spotify
 | `--script hook.js` | load your own Frida script after the built-in hooks (repeatable; also bundled into gadget builds) |
 | `--no-auto-hooks` | don't hook the app's own certificate checks |
 | `--global-proxy` | without Frida, use the device-wide proxy setting instead of redirecting only the app |
-| `--headless` | no emulator window or scrcpy |
+| `--headless` | no windows: neither the emulator's own nor scrcpy |
 | `--api 34` | use the Android 14 emulator (any version you've run `setup` for) |
 
 ### Between apps
@@ -519,8 +519,15 @@ the symbols Frida uses to make hooked methods safe for the collector. What unpin
 
 ### The screen
 
-Unless you pass `--headless`, you get the **emulator window** (emulator runs) and a **scrcpy window** (both). Both
-are live remote controls:
+Unless you pass `--headless`, you get one window:
+
+- **On the emulator, the emulator's own window.** Its side toolbar has Back, Home and the app switcher, rotation,
+  screenshots, and **⋯** for the extended controls (location, battery, phone calls, fingerprint and so on). If the
+  emulator was already running without a window (from an earlier `--headless` run), you get scrcpy instead.
+- **On the phone, a scrcpy window.**
+
+Both are live remote controls. Clicking, typing and dragging an APK or a file onto them work in both; the shortcuts
+below are scrcpy's:
 
 | Do this | To |
 |---|---|
