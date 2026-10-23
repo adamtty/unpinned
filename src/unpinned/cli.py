@@ -10,7 +10,7 @@ import sys
 import tempfile
 from pathlib import Path
 
-from unpinned import analyze, apk, assets, certs, device, env, hooks, intercept, patch, phone, static, watch
+from unpinned import analyze, apk, assets, banner, certs, device, env, hooks, intercept, patch, phone, static, watch
 
 WATCH_DEFAULT, WATCH_PROTECTED = 20.0, 60.0
 STRATEGIES = {
@@ -942,6 +942,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 def main(argv: list[str] | None = None) -> None:
     a = build_parser().parse_args(argv)
+    banner.show()
     try:
         sys.exit(a.fn(a))
     except (
