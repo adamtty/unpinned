@@ -691,3 +691,18 @@ def test_sdk_code_isnt_counted_as_the_apps_own():
     for sdk in ("Lcom/huawei/agconnect/credential/obs/ag;", "Lcom/huawei/hms/analytics/core/transport/net/e;"):
         assert sdk.startswith(analyze.LIBRARY_PREFIXES)  # MyTV+ offered 41 "own" checks, nearly all Huawei's
     assert not "Lcom/ngc/FastTvLitePlus/d1/g;".startswith(analyze.LIBRARY_PREFIXES)
+
+
+def test_has_window_reads_the_running_emulators_arguments(monkeypatch):
+    import subprocess
+
+    ps = (
+        "/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd unpinned-api34 -no-audio -no-window\n"
+        "/sdk/emulator/qemu/darwin-aarch64/qemu-system-aarch64 -avd unpinned-api36_1 -snapshot unpinned-clean\n"
+        "/usr/bin/vim -avd unpinned-api35\n"
+    )
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, ps, ""))
+    assert device.has_window("36.1")
+    assert not device.has_window("34")  # started with -no-window: scrcpy shows it instead
+    assert not device.has_window("33")  # not running at all
+    assert not device.has_window("35")  # only an emulator's own arguments count

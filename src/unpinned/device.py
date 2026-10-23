@@ -116,6 +116,18 @@ def running(api: str) -> str | None:
     return None
 
 
+def has_window(api: str) -> bool:
+    """Was this AVD's running emulator started with its own window (not -no-window)?"""
+    out = subprocess.run(["/bin/ps", "-Ao", "args="], capture_output=True, text=True, timeout=10, check=False).stdout
+    for line in out.splitlines():
+        args = line.split()
+        if not args or not ("qemu-system" in args[0] or args[0].endswith("/emulator")):
+            continue
+        if "-avd" in args and args[args.index("-avd") + 1 :][:1] == [env.avd_name(api)]:
+            return "-no-window" not in args
+    return False
+
+
 def boot(api: str, cold: bool = False, window: bool = True) -> str:
     """Start the AVD (from the clean snapshot, discarding changes on exit; or cold for setup) and wait for boot."""
     emulator = env.tool("emulator")

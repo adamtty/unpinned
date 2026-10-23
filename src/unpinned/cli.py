@@ -593,16 +593,18 @@ def cmd_run(a) -> int:
     if serial:
         say(f"resetting {serial} to the clean snapshot")
         device.reset(serial, a.api)
+        window = device.has_window(a.api)
     else:
         say("booting from the clean snapshot")
         serial = device.boot(a.api, window=not a.headless)
+        window = not a.headless
 
     host, port, url, config = _setup_proxy(a, serial, own, run_dir)
     if strategy == "gadget" and not device.uses_cc_gc(serial):
         warn(f"this snapshot predates the garbage-collector switch: run `{device.setup_command(a.api)}` again")
     if strategy in ("gadget", "apk-mitm"):
         apks = _patch(strategy, original, package, config, run_dir, a.api, [Path(x) for x in a.script or []])
-    if not a.headless:
+    if not a.headless and not window:  # the emulator's own window shows it; scrcpy only for a windowless one
         intercept.start_scrcpy(serial, f"unpinned · {package}")
 
     done = _run_and_watch(

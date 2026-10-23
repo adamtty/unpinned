@@ -78,8 +78,8 @@ unpinned run app.apk        # triage → choose → reset → install → unpin 
      Conscrypt APEX in every app's namespace). That covers code the hooks don't reach, like Flutter's Dart.
    - **Install:** single APKs, split bundles (`.apks`, `.xapk`, a `.zip` of APKs) and loose splits (a folder of
      them, or the `.apk` files) all work.
-   - **Hand over:** scrcpy shows the screen, the proxy shows the traffic, and with hooks you can open a Frida REPL
-     inside the app.
+   - **Hand over:** the emulator's window (or scrcpy, for a phone) shows the screen, the proxy shows the traffic,
+     and with hooks you can open a Frida REPL inside the app.
 
 5. **Watch for a refusal.** For the first 20 seconds it checks whether the app closed (with Android's recorded exit
    reason) or shows text about root, tampering, Frida, an emulator or integrity. If it does, unpinned offers to
