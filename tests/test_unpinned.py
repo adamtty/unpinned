@@ -706,3 +706,18 @@ def test_has_window_reads_the_running_emulators_arguments(monkeypatch):
     assert not device.has_window("34")  # started with -no-window: scrcpy shows it instead
     assert not device.has_window("33")  # not running at all
     assert not device.has_window("35")  # only an emulator's own arguments count
+
+
+def test_strategy_flag_skips_the_question(monkeypatch):
+    from unpinned import cli
+
+    def ask(*_):
+        raise AssertionError("asked anyway")
+
+    monkeypatch.setattr(cli, "interactive", lambda: True)
+    monkeypatch.setattr("builtins.input", ask)
+    a = cli.build_parser().parse_args(["run", "app.apk", "--strategy", "hooks"])
+    assert cli.pick_strategy(a, "gadget") == "hooks"
+    a = cli.build_parser().parse_args(["run", "app.apk"])
+    monkeypatch.setattr("builtins.input", lambda *_: "")  # no flag: asked, and Enter takes the recommendation
+    assert cli.pick_strategy(a, "gadget") == "gadget"
