@@ -55,13 +55,14 @@ LIBRARY_PREFIXES = (
     "Lcom/guardsquare/",
     "Lno/promon/",
     "Lcom/appdome/",
+    "Lcom/pairip/",  # Google Play's automatic protection
 )
 CERT_FILE_RE = re.compile(r"^(assets|res)/.+\.(cer|crt|pem|der|bks|p12|pfx|jks)$", re.I)
 
 
 @dataclass
 class Finding:
-    category: str  # pinning | ct | root | integrity | anti_frida | emulator | anti_debug | protector
+    category: str  # pinning | ct | root | integrity | anti_frida | emulator | anti_debug | protector | play_licence
     label: str
     strength: str
     evidence: list[str] = field(default_factory=list)
@@ -90,6 +91,12 @@ class Report:
     @property
     def detects_root(self) -> bool:
         return any(f.strength != POSSIBLE for f in self.of("root", "integrity"))
+
+    @property
+    def play_protected(self) -> bool:
+        """Google Play's automatic protection: the app asks the Play Store whether Play installed it. No Play Store
+        (unpinned's emulator) or a re-signed copy (the gadget, apk-mitm) fails that, whatever else is done."""
+        return bool(self.of("play_licence"))
 
     @property
     def detects_frida(self) -> bool:
@@ -448,6 +455,11 @@ def analyze(apks: list[Path]) -> Report:
                 ["the server decides; an emulator fails device integrity whatever is hooked"],
             )
         )
+    if has_type("Lcom/pairip/licensecheck/"):
+        ev = ["com.pairip.licensecheck: asks the Play Store whether Play installed the app"]
+        if any(n.endswith("/libpairipcore.so") for n in names):
+            ev.append("libpairipcore.so: code protection and tamper checks too")
+        add(Finding("play_licence", "Google Play automatic protection", DEFINITE, ev))
     if has_type("Lcom/google/android/gms/safetynet/"):
         add(Finding("integrity", "SafetyNet attestation (deprecated)", LIKELY, ["com.google.android.gms.safetynet"]))
     if has_type("Lcom/aheaditec/talsec/") or "freerasp" in flutter_hits | rn_hits:
@@ -490,6 +502,14 @@ APKID_CATEGORIES = {
 }
 
 
+# apkid files Google's own protections under "protector"; triage has its own categories for them (they aren't RASP:
+# nothing in them looks for root or Frida)
+APKID_GOOGLE = [
+    (re.compile(r"google automatic integrity|pairip", re.I), "play_licence", DEFINITE),
+    (re.compile(r"play integrity", re.I), "integrity", LIKELY),
+]
+
+
 def apkid(apks: list[Path]) -> tuple[list[Finding], list[str]]:
     """Run apkid over the APKs. → (findings, compilers seen); ([], []) when apkid isn't installed or fails."""
     import json
@@ -526,6 +546,7 @@ def apkid(apks: list[Path]) -> tuple[list[Finding], list[str]]:
     for (category, label), wheres in sorted(found.items()):
         ours, strength = APKID_CATEGORIES[category]
         if category in named:
+            ours, strength = next(((c, st) for rx, c, st in APKID_GOOGLE if rx.search(label)), (ours, strength))
             findings.append(Finding(ours, f"{label} (apkid)", strength, sorted(wheres)[:4]))
         else:
             grouped.setdefault(category, []).append(label)

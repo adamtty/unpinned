@@ -109,6 +109,7 @@ TITLES = {
     "ct": "Certificate Transparency",
     "root": "Root detection",
     "integrity": "Device attestation",
+    "play_licence": "Google Play licence check",
     "anti_frida": "Frida detection",
     "emulator": "Emulator detection",
     "anti_debug": "Debugger detection",
@@ -126,6 +127,24 @@ PROTECTOR_ADVICE = (
     "    · on an authorised test, a build with the protection in development / report-only mode, or with your test "
     "device allowlisted: most protectors support this, and it's how protected apps are usually assessed"
 )
+
+
+PLAY_ADVICE = (
+    "The app asks the Play Store whether Play installed it, and closes if not. That can't pass on unpinned's "
+    "emulator (it has no Play Store), and patching (gadget, apk-mitm) fails it anywhere, since the copy is re-signed. "
+    "What works: your phone, with the app installed from Play, and a method that leaves the app untouched:\n"
+    "    · `unpinned phone {package} --strategy hooks` (or `ca`)"
+)
+PATCHING = ("gadget", "apk-mitm")
+
+
+def strategy_options(r: analyze.Report) -> list[tuple[str, str]]:
+    if not r.play_protected:
+        return list(STRATEGIES.items())
+    return [
+        (k, v + (" \033[33m(fails Google Play's licence check)\033[0m" if k in PATCHING else ""))
+        for k, v in STRATEGIES.items()
+    ]
 
 
 def show_report(r: analyze.Report) -> None:
@@ -166,6 +185,8 @@ def show_report(r: analyze.Report) -> None:
             "\n  \033[2mPlay Integrity / SafetyNet is judged on Google's servers: an emulator fails device integrity "
             "whatever runs on it, so flows gated on it won't work here.\033[0m"
         )
+    if r.play_protected:
+        print("\n  \033[33mGoogle Play automatic protection.\033[0m " + PLAY_ADVICE.format(package=t.package))
     if protectors := [f.label for f in r.of("protector")]:
         print(f"\n  \033[33mProtected by {', '.join(protectors)}.\033[0m " + PROTECTOR_ADVICE)
     print()
@@ -230,20 +251,21 @@ def report_json(r: analyze.Report, show_secrets: bool) -> dict:
     }
 
 
-def pick_strategy(a, rec: str) -> str:
+def pick_strategy(a, rec: str, options: list[tuple[str, str]] | None = None) -> str:
     """--strategy decides outright (no question); otherwise ask, with the recommendation as the default."""
     if a.strategy != "auto":
         return a.strategy
-    return choose("How should unpinned get at the traffic?", list(STRATEGIES.items()), rec, a.yes)
+    return choose("How should unpinned get at the traffic?", options or list(STRATEGIES.items()), rec, a.yes)
 
 
 def recommend(r: analyze.Report) -> str:
     """Nothing pinned: no Frida at all (nothing for root or Frida checks to find, and root on unpinned's emulator is
     invisible to apps anyway; if the app still refuses, the watcher offers a patch). Pinned and Frida-aware: the
-    gadget, so there's no frida-server to find. Otherwise the hooks."""
+    gadget, so there's no frida-server to find (unless Google Play's licence check is there: a patched copy fails it).
+    Otherwise the hooks."""
     if r.pinning() == "none" and not r.of("ct"):
         return "ca"
-    if r.detects_frida:
+    if r.detects_frida and not r.play_protected:
         return "gadget"
     return "hooks"
 
@@ -489,9 +511,11 @@ def _run_and_watch(
     api=None,
     confirm_reinstall=None,
     before_launch=None,
+    no_patching: str = "",
 ) -> str | None:
     """Launch, watch for a refusal, and offer the next patch until the app runs. → the strategy that worked, or None
-    when the user stops (or nothing is left to try). before_launch(strategy) runs before each attempt."""
+    when the user stops (or nothing is left to try). before_launch(strategy) runs before each attempt. no_patching:
+    why patching can't help this app (Google Play's licence check), said instead of offering a patch."""
     tried = {strategy}
     while True:
         if before_launch:
@@ -502,6 +526,9 @@ def _run_and_watch(
         if outcome.ok:
             return strategy
         warn(f"the app refused to run: {outcome.reason}")
+        if no_patching:
+            warn(no_patching)
+            return None
         options = [(k, STRATEGIES[k]) for k in ("gadget", "apk-mitm") if k not in tried]
         if not options:
             warn("every strategy has been tried: this one needs an app-specific hook (jadx, then --script)")
@@ -587,8 +614,12 @@ def cmd_run(a) -> int:
     if auto := _pin_check_hooks(a, r, run_dir):
         a.script = [*(a.script or []), str(auto)]
 
+    if r.play_protected:
+        warn("Google Play's licence check can't pass on the emulator (no Play Store): use `unpinned phone` instead")
+        if interactive() and not a.yes and input("\033[1m › carry on anyway? [y/N] \033[0m").strip().lower() != "y":
+            return 1
     rec = a.strategy if a.strategy != "auto" else recommend(r)
-    strategy = pick_strategy(a, rec)
+    strategy = pick_strategy(a, rec, strategy_options(r))
     say(f"using: {strategy}")
     if strategy == "gadget":
         a.api = gadget_api(a)
@@ -615,7 +646,23 @@ def cmd_run(a) -> int:
         intercept.start_scrcpy(serial, f"unpinned · {package}")
 
     done = _run_and_watch(
-        a, serial, package, strategy, apks, original, config, run_dir, server, (host, port), api=a.api
+        a,
+        serial,
+        package,
+        strategy,
+        apks,
+        original,
+        config,
+        run_dir,
+        server,
+        (host, port),
+        api=a.api,
+        no_patching=(
+            "it has Google Play's licence check, which can't pass here and which a patched copy fails anywhere: "
+            f"run it on your phone, installed from Play, with `unpinned phone {package} --strategy hooks`"
+        )
+        if r.play_protected
+        else "",
     )
     if not done:
         return 2
@@ -673,7 +720,7 @@ def cmd_phone(a) -> int:
     rec = a.strategy if a.strategy != "auto" else recommend(r)
     if rec in ("gadget", "apk-mitm") and a.strategy == "auto":
         rec = "hooks"  # on the phone, try the ways that keep the app's data first
-    strategy = pick_strategy(a, rec)
+    strategy = pick_strategy(a, rec, strategy_options(r))
     say(f"using: {strategy}")
     own = pick_proxy(a)
 
@@ -723,6 +770,13 @@ def cmd_phone(a) -> int:
         (host, port),
         confirm_reinstall=confirm_reinstall,
         before_launch=root_hiding,
+        no_patching=(
+            "it has Google Play's licence check, which a patched copy fails, so there's nothing to patch. If Play "
+            "installed it, the refusal is more likely root detection: check root hiding is on (it is unless "
+            "--no-hide-root was given)"
+        )
+        if r.play_protected
+        else "",
     )
     if not done:
         return 2

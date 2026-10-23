@@ -562,6 +562,73 @@ def test_recommendation():
     assert cli.recommend(report(pin, root)) == "hooks"
 
 
+def test_google_play_protection_is_found_in_the_dex(tmp_path, monkeypatch):
+    from unpinned import analyze, static
+
+    lc = "Lcom/pairip/licensecheck/LicenseClient;"
+    dexdata = build([lc, "Ljava/lang/Object;"], [(lc, "Ljava/lang/Object;", [])])
+    base = _zip(tmp_path / "base.apk", {"AndroidManifest.xml": b"x", "classes.dex": dexdata})
+    split = _zip(
+        tmp_path / "split_config.arm64_v8a.apk", {"AndroidManifest.xml": b"x", "lib/arm64-v8a/libpairipcore.so": b""}
+    )
+    monkeypatch.setattr(analyze.apk, "triage", lambda apks: apk.Triage("a.b", apks=apks))
+    monkeypatch.setattr(analyze, "network_security_config", lambda base: {})
+    monkeypatch.setattr(analyze, "apkid", lambda apks: ([], []))
+    monkeypatch.setattr(static, "manifest", lambda base: static.Manifest())
+    r = analyze.analyze([base, split])
+    [f] = r.of("play_licence")
+    assert f.strength == analyze.DEFINITE and any("libpairipcore" in e for e in f.evidence)
+    assert r.play_protected and not r.of("protector") and not r.pin_checks  # its own code isn't the app's
+
+
+def test_apkid_files_googles_protections_under_their_own_categories(tmp_path, monkeypatch):
+    import json
+    import subprocess
+
+    from unpinned import analyze
+
+    matches = {
+        "protector": ["DexGuard", "Google Automatic Integrity (Installer check)", "Play Integrity API"],
+    }
+    out = json.dumps({"files": [{"filename": "app.apk!classes.dex", "matches": matches}]})
+    monkeypatch.setattr("shutil.which", lambda tool: "/x/apkid")
+    monkeypatch.setattr(subprocess, "run", lambda *a, **k: subprocess.CompletedProcess(a, 0, out, ""))
+    findings, _ = analyze.apkid([tmp_path / "app.apk"])
+    cats = {f.label: f.category for f in findings}
+    assert cats["DexGuard (apkid)"] == "protector"
+    assert cats["Google Automatic Integrity (Installer check) (apkid)"] == "play_licence"
+    assert cats["Play Integrity API (apkid)"] == "integrity"
+
+
+def test_google_play_protection_steers_away_from_patching(capsys):
+    from unpinned import analyze, cli
+
+    r = analyze.Report(apk.Triage("com.easyway.wl"))
+    r.findings = [
+        analyze.Finding("pinning", "pins", analyze.DEFINITE),
+        analyze.Finding("anti_frida", "lib", analyze.LIKELY),
+        analyze.Finding("play_licence", "Google Play automatic protection", analyze.DEFINITE),
+    ]
+    assert cli.recommend(r) == "hooks"  # not the gadget: a re-signed copy fails the licence check
+    options = dict(cli.strategy_options(r))
+    assert "licence check" in options["gadget"] and "licence check" in options["apk-mitm"]
+    assert "licence check" not in options["hooks"] + options["ca"]
+    cli.show_report(r)
+    out = capsys.readouterr().out
+    assert "no Play Store" in out and "unpinned phone com.easyway.wl --strategy hooks" in out
+
+
+def test_watcher_knows_google_plays_dialogs():
+    from unpinned import watch
+
+    for text in (
+        "Check that Google Play is enabled on your device and that you're using an up-to-date version",
+        "Get this app from Play",
+    ):
+        assert watch.REFUSAL_RE.search(text)
+    assert not watch.REFUSAL_RE.search("Something went wrong")  # too generic on its own
+
+
 def test_protected_apps_get_plain_advice(capsys):
     from unpinned import analyze, cli
 
