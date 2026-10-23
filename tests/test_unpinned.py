@@ -45,9 +45,24 @@ def test_a_bundle_is_unpacked_base_first(tmp_path):
     assert all(p.parent == tmp_path / "w" for p in out)
 
 
+def test_a_finder_zip_skips_the_macos_metadata(tmp_path):
+    # Finder's "Compress" adds __MACOSX/<folder>/._<name>.apk next to each APK: tiny AppleDouble files, not zips
+    inner = {n: _apk(tmp_path / n).read_bytes() for n in ("base.apk", "split_config.en.apk")}
+    members = {f"app/{n}": d for n, d in inner.items()} | {f"__MACOSX/app/._{n}": b"\x00\x05\x16\x07" for n in inner}
+    out = apk.load(_zip(tmp_path / "app.zip", members), tmp_path / "w")
+    assert [p.name for p in out] == ["base.apk", "split_config.en.apk"]
+
+
+def test_a_bundle_member_that_isnt_an_apk_is_refused(tmp_path):
+    b = _zip(tmp_path / "app.zip", {"base.apk": _apk(tmp_path / "base.apk").read_bytes(), "notes.apk": b"text"})
+    with pytest.raises(apk.ApkError, match=r"notes\.apk isn't an APK"):
+        apk.load(b, tmp_path / "w")
+
+
 @pytest.mark.parametrize("name", ["../evil.apk", "a b.apk", "dup.apk"])
 def test_bundle_names_cannot_escape_or_collide(tmp_path, name):
-    members = {name: b"x"} if name != "dup.apk" else {"a/dup.apk": b"x", "b/dup.apk": b"y"}
+    ok = _apk(tmp_path / "ok.apk").read_bytes()
+    members = {name: ok} if name != "dup.apk" else {"a/dup.apk": ok, "b/dup.apk": ok}
     b = _zip(tmp_path / "x.xapk", members)
     if name == "../evil.apk":  # flattened to its base name, inside workdir
         assert [p.name for p in apk.load(b, tmp_path / "w")] == ["evil.apk"]
