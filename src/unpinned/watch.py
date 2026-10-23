@@ -1,6 +1,6 @@
 """After launch: did the app come up, or did it refuse? It refused if its process died within the watch window (Android
 records why: crash, exit, killed by a signal) or its own window shows text about root, tampering, Frida, an emulator,
-integrity or a debugger."""
+integrity or a debugger, or Google Play's licence-check dialogs."""
 
 from __future__ import annotations
 
@@ -13,7 +13,9 @@ from unpinned import device
 REFUSAL_RE = re.compile(
     r"\b(root(ed)?\b|jail\s?broken|jailbreak|superuser|magisk|\bsu\b binary|tamper\w*|emulat\w+|integrity|"
     r"insecure device|unsafe device|security (risk|threat|issue)|frida|hook\w*|debugg\w+|modified|"
-    r"not (supported|allowed) on this device|compromised)",
+    r"not (supported|allowed) on this device|compromised|"
+    # Google Play's automatic protection: no Play Store to ask, or not installed from Play
+    r"check that google play is enabled|get this app from (google )?play)",
     re.I,
 )
 

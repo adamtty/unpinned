@@ -172,6 +172,7 @@ Then each kind of finding, marked ● definite, ● likely or ○ possible, with
 | **Certificate Transparency** | Appmattus CT |
 | **Root detection** | RootBeer; `su` paths, Magisk and similar strings; root checks in native code; root-detection plugins (Flutter, React Native); native libraries named for root checks (RootBeer's `libtool-checker.so`, …) |
 | **Device attestation** | Play Integrity, SafetyNet |
+| **Google Play licence check** | Google Play's automatic protection (`com.pairip`), and `libpairipcore.so` with it ([below](#google-play-automatic-protection)) |
 | **Frida detection** | Frida strings in DEX or native code; native libraries named for Frida checks (`libfrida-check.so`, …) |
 | **Emulator detection** | emulator property and hardware names |
 | **Debugger detection** | `isDebuggerConnected`, `TracerPid` |
@@ -219,6 +220,30 @@ Google API key's restrictions, check a Firebase database's rules.
 If triage finds a runtime protector (RASP), it says so plainly, with what works best: a real phone with root
 hidden, or on an authorised test a build with the protection in development mode or your device allowlisted. See
 [section 17](#17-limits-what-unpinned-cant-do).
+
+### Google Play automatic protection
+
+Developers can turn on **automatic protection** in the Play Console, and Google adds a licence check to the app
+(`com.pairip.licensecheck`). At launch the app asks the Play Store whether Play installed it, for an account that has
+it. If there's no answer it shows *"Something went wrong. Check that Google Play is enabled on your device…"*; if
+the answer is no, *"Get this app from Play"*. Then it closes.
+
+- **unpinned's emulator can't pass it.** It's a Google APIs image, with no Play Store to ask, and Play Store images
+  can't be rooted. `run` warns about this and asks before carrying on.
+- **Patching fails it anywhere.** The gadget and apk-mitm re-sign the app, so it's no longer the copy Play
+  installed. unpinned doesn't recommend them for these apps, labels them *"fails Google Play's licence check"*, and
+  doesn't offer them after a refusal.
+- **What works:** your phone, with the app installed from Play as usual, and a method that leaves the app untouched:
+
+  ```bash
+  uv run unpinned phone com.example.app --strategy hooks
+  ```
+
+  If it still refuses there, the licence check isn't the likely cause: look at root detection (root hiding is on by
+  default for `hooks`).
+
+apkid reports the same thing as *"Google Automatic Integrity (Installer check)"*, and its *"Play Integrity API"* as
+device attestation. Neither counts as a RASP: nothing in them looks for root or Frida.
 
 ### apkid (optional)
 
@@ -495,14 +520,16 @@ After launch, the **watcher** checks the app for 20 seconds (60 when triage foun
 their background checks). The app has **refused** if:
 
 - **it exited**: unpinned reports Android's own exit reason and the exception that ended the app
-- **it's showing** text about root, tampering, Frida, an emulator, integrity or a debugger
+- **it's showing** text about root, tampering, Frida, an emulator, integrity or a debugger, or one of Google Play's
+  licence-check dialogs ([Google Play automatic protection](#google-play-automatic-protection))
 - **it closed its window** but kept its process (some Frida checks do this)
 
 With each refusal, unpinned quotes **the app's own log line** when there is one, e.g.
 *"it closed its window; the app logged: FRIDA Server DETECTED"*.
 
 Then it offers the next method: the **gadget** patch, then **apk-mitm**, reinstalling and reopening each time.
-`--yes` takes them in order without asking. On the phone, each reinstall is confirmed first.
+`--yes` takes them in order without asking. On the phone, each reinstall is confirmed first. Apps with Google
+Play's licence check are the exception: a patched copy fails it, so unpinned says why the app refused and stops there.
 
 ### Gadget and Android 16
 
@@ -597,6 +624,9 @@ pinned, try `gadget` (no frida-server to find), then `apk-mitm`.
 
 **An app that refuses rooted devices.** Let the watcher handle it: it'll offer the gadget (which bypasses root
 checks from inside), then apk-mitm. On your phone, root hiding is on by default for `hooks` and `gadget`.
+
+**An app from Google Play that says "Check that Google Play is enabled"** (triage shows *Google Play licence
+check*). Install it from Play on your phone, then `phone <name> --strategy hooks`. It can't pass on the emulator.
 
 **An app with runtime protection (RASP).** Expect to lose on the emulator. Try `phone` with root hidden; on an
 authorised test, ask for a build with the protection in development mode.
@@ -711,6 +741,9 @@ against GitHub's published SHA-256. On devices where it won't run, it uses 17.5.
 
 - **Play Integrity / SafetyNet** are judged on Google's servers. An emulator, and usually a rooted phone, fails
   them whatever runs on it, so features gated on them won't work.
+- **Google Play automatic protection** (the licence check) needs the Play Store and the copy Play installed, so it
+  never passes on the emulator, or with a patched app. Use your phone with `hooks` or `ca`
+  ([section 5](#google-play-automatic-protection)).
 - **Runtime protection (RASP)** such as freeRASP, Promon, DexGuard or Appdome is built to spot emulators, root and
   instrumentation, and often ends the app. It wins on the emulator. A real phone with root hidden gets further (the
   freeRASP demo kept running under the gadget on a real phone). Beating a RASP properly means per-app work or a
