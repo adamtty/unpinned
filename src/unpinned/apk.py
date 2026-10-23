@@ -75,7 +75,7 @@ def load(path: Path, workdir: Path) -> list[Path]:
         names = z.namelist()
         if "AndroidManifest.xml" in names:
             return [path]  # a plain APK
-        members = [i for i in z.infolist() if not i.is_dir() and i.filename.lower().endswith(".apk")]
+        members = [i for i in z.infolist() if not i.is_dir() and i.filename.lower().endswith(".apk") and not _mac(i)]
         if not members:
             raise ApkError(f"{path.name} has no AndroidManifest.xml and no .apk files inside")
         if len(members) > MAX_APKS:
@@ -101,8 +101,16 @@ def load(path: Path, workdir: Path) -> list[Path]:
                     if total[0] < 0:
                         raise ApkError(f"{path.name}: the APKs add up to more than {MAX_BUNDLE_BYTES // (1024**3)} GB")
                     dst.write(chunk)
+            if not zipfile.is_zipfile(dest):
+                raise ApkError(f"{path.name}: {base} isn't an APK (not a zip)")
             out.append(dest)
     return sorted(out, key=lambda p: (p.name != "base.apk", p.name))
+
+
+def _mac(member: zipfile.ZipInfo) -> bool:
+    """macOS metadata that Finder's "Compress" adds: __MACOSX/…/._name.apk, a few bytes, not an APK."""
+    name = member.filename.replace("\\", "/")
+    return name.startswith("__MACOSX/") or name.rsplit("/", 1)[-1].startswith("._")
 
 
 def _members(apks: list[Path]) -> list[str]:
