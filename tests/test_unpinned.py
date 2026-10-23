@@ -1,12 +1,15 @@
 """The parts that don't need a device: reading APKs and bundles, triage, config rendering, ports, the frida command."""
 
+import os
 import socket
 import ssl
+import sys
 import zipfile
 
 import pytest
 
 from unpinned import apk, assets, device, env, intercept, trust
+from unpinned import apk, assets, banner, device, env, intercept
 
 PEM = "-----BEGIN CERTIFICATE-----\nMIIBfake\n-----END CERTIFICATE-----"
 TEMPLATE = """const CERT_PEM = `-----BEGIN CERTIFICATE-----
@@ -788,3 +791,27 @@ def test_strategy_flag_skips_the_question(monkeypatch):
     a = cli.build_parser().parse_args(["run", "app.apk"])
     monkeypatch.setattr("builtins.input", lambda *_: "")  # no flag: asked, and Enter takes the recommendation
     assert cli.pick_strategy(a, "gadget") == "gadget"
+def test_banner_lines_line_up_and_take_their_colours():
+    lines = banner.WORDMARK.splitlines()
+    assert len(lines) == len(banner.HEAT) and banner.WIDTH <= 80
+    assert lines[0].index("▄█") == lines[2].index("██████╗")  # the shackle sits on the P
+    assert "\033[" not in banner.render(color=False)
+    assert banner.render().count("\033[38;5;") == len(banner.HEAT)
+
+
+def test_banner_only_for_a_terminal(monkeypatch, capsys):
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: False)
+    banner.show()
+    assert capsys.readouterr().out == ""
+
+
+def test_banner_respects_no_color_and_narrow_terminals(monkeypatch, capsys):
+    monkeypatch.setattr(sys.stdout, "isatty", lambda: True)
+    monkeypatch.setattr(banner.shutil, "get_terminal_size", lambda: os.terminal_size((120, 40)))
+    monkeypatch.setenv("NO_COLOR", "1")
+    banner.show()
+    out = capsys.readouterr().out
+    assert "██████╗" in out and "\033[" not in out
+    monkeypatch.setattr(banner.shutil, "get_terminal_size", lambda: os.terminal_size((40, 40)))
+    banner.show()
+    assert capsys.readouterr().out == ""
