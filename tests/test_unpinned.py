@@ -584,7 +584,7 @@ def test_downloads_trust_the_default_roots_but_not_emudhra(monkeypatch):
     ctx = trust.context()
     names = [str(c.get("subject")) for c in ctx.get_ca_certs()]
     assert len(names) > 100 and ctx.check_hostname
-    assert not [n for n in names if "eMudhra" in n or "emSign" in n]
+    assert not [n for n in names if "eMudhra" in n or "emSign" in n or "AAA Certificate" in n]
 
 
 def test_only_emudhra_roots_are_dropped(tmp_path, monkeypatch):
@@ -592,7 +592,8 @@ def test_only_emudhra_roots_are_dropped(tmp_path, monkeypatch):
     emudhra = [p for p in pems if trust.distrusted(p)]
     if not emudhra:
         pytest.skip("this machine's default roots have no eMudhra root")
-    assert all(b"emSign" in ssl.PEM_cert_to_DER_cert(p) for p in emudhra)
+    ders = [ssl.PEM_cert_to_DER_cert(p) for p in emudhra]
+    assert all(b"emSign" in d or b"AAA Certificate" in d for d in ders)
     bundle = tmp_path / "corp.pem"
     bundle.write_text("\n".join([next(p for p in pems if not trust.distrusted(p)), *emudhra]))
     monkeypatch.setenv("SSL_CERT_FILE", str(bundle))  # honoured, and filtered too
