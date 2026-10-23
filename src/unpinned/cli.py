@@ -230,6 +230,13 @@ def report_json(r: analyze.Report, show_secrets: bool) -> dict:
     }
 
 
+def pick_strategy(a, rec: str) -> str:
+    """--strategy decides outright (no question); otherwise ask, with the recommendation as the default."""
+    if a.strategy != "auto":
+        return a.strategy
+    return choose("How should unpinned get at the traffic?", list(STRATEGIES.items()), rec, a.yes)
+
+
 def recommend(r: analyze.Report) -> str:
     """Nothing pinned: no Frida at all (nothing for root or Frida checks to find, and root on unpinned's emulator is
     invisible to apps anyway; if the app still refuses, the watcher offers a patch). Pinned and Frida-aware: the
@@ -581,7 +588,7 @@ def cmd_run(a) -> int:
         a.script = [*(a.script or []), str(auto)]
 
     rec = a.strategy if a.strategy != "auto" else recommend(r)
-    strategy = choose("How should unpinned get at the traffic?", list(STRATEGIES.items()), rec, a.yes)
+    strategy = pick_strategy(a, rec)
     say(f"using: {strategy}")
     if strategy == "gadget":
         a.api = gadget_api(a)
@@ -666,7 +673,7 @@ def cmd_phone(a) -> int:
     rec = a.strategy if a.strategy != "auto" else recommend(r)
     if rec in ("gadget", "apk-mitm") and a.strategy == "auto":
         rec = "hooks"  # on the phone, try the ways that keep the app's data first
-    strategy = choose("How should unpinned get at the traffic?", list(STRATEGIES.items()), rec, a.yes)
+    strategy = pick_strategy(a, rec)
     say(f"using: {strategy}")
     own = pick_proxy(a)
 
