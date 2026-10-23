@@ -312,7 +312,7 @@ def _launch(
         used = device.start_frida_server(serial, server, assets.frida_server_fallback)
         if used != "pinned":
             warn(f"this device can't run current frida-server ({device.FRIDA_OLD_DEVICE_BUG}): using {used}")
-        cmd = intercept.frida_command(serial, package, config, extra=a.script)
+        cmd = intercept.frida_command(serial, package, config, extra=a.script, hide_proxy=a.hide_proxy)
         log = run_dir / "frida.log"
         proc = intercept.start_hooks(cmd, log)
         if not intercept.wait_for(log, "Resuming main thread", 60, proc):
@@ -480,6 +480,7 @@ def _patch(
     run_dir: Path,
     api: str | None,
     extra: list[Path] | None = None,
+    hide_proxy: bool = False,
 ) -> list[Path]:
     if kind == "gadget":
         if api and not api.startswith(("1", "2", "30", "31", "32", "33", "34", "35")):
@@ -491,6 +492,7 @@ def _patch(
             config.read_text(),
             run_dir / "gadget",
             extra=[p.read_text() for p in extra or []],
+            hide_proxy=hide_proxy,
         )
     say("repackaging with apk-mitm")
     return patch.apk_mitm(original, run_dir / "apk-mitm")
@@ -526,6 +528,29 @@ def _run_and_watch(
         if outcome.ok:
             return strategy
         warn(f"the app refused to run: {outcome.reason}")
+        if outcome.proxy and strategy in ("hooks", "gadget") and not a.hide_proxy:
+            again = choose(
+                "It spotted the proxy. Reopen it with the proxy hidden?",
+                [
+                    ("hide", "yes: no proxy settings for the app to see; its connections are still redirected"),
+                    ("stop", "stop here"),
+                ],
+                "hide",
+                a.yes,
+            )
+            if again == "stop":
+                return None
+            a.hide_proxy = True
+            say("hiding the proxy: the hooks redirect the app's sockets without telling it about a proxy")
+            if strategy == "gadget":
+                if confirm_reinstall and not confirm_reinstall():
+                    return None
+                apks = _patch(
+                    "gadget", original, package, config, run_dir, api, [Path(x) for x in a.script or []], True
+                )
+            else:
+                apks = None  # the hooks just respawn it: nothing to reinstall
+            continue
         if no_patching:
             warn(no_patching)
             return None
@@ -538,7 +563,7 @@ def _run_and_watch(
         if nxt == "stop" or (confirm_reinstall and not confirm_reinstall()):
             return None
         tried.add(nxt)
-        apks = _patch(nxt, original, package, config, run_dir, api, [Path(x) for x in a.script or []])
+        apks = _patch(nxt, original, package, config, run_dir, api, [Path(x) for x in a.script or []], a.hide_proxy)
         strategy = nxt
 
 
@@ -641,7 +666,9 @@ def cmd_run(a) -> int:
     if strategy == "gadget" and not device.uses_cc_gc(serial):
         warn(f"this snapshot predates the garbage-collector switch: run `{device.setup_command(a.api)}` again")
     if strategy in ("gadget", "apk-mitm"):
-        apks = _patch(strategy, original, package, config, run_dir, a.api, [Path(x) for x in a.script or []])
+        apks = _patch(
+            strategy, original, package, config, run_dir, a.api, [Path(x) for x in a.script or []], a.hide_proxy
+        )
     if not a.headless and not window:  # the emulator's own window shows it; scrcpy only for a windowless one
         intercept.start_scrcpy(serial, f"unpinned · {package}")
 
@@ -741,7 +768,9 @@ def cmd_phone(a) -> int:
     server = assets.ensure_frida_server()
     host, port, url, config = _setup_proxy(a, serial, own, run_dir)
     if strategy in ("gadget", "apk-mitm"):
-        apks = _patch(strategy, original, package, config, run_dir, None, [Path(x) for x in a.script or []])
+        apks = _patch(
+            strategy, original, package, config, run_dir, None, [Path(x) for x in a.script or []], a.hide_proxy
+        )
     if not a.headless:
         intercept.start_scrcpy(serial, f"unpinned · {package}")
 
@@ -824,7 +853,7 @@ def cmd_patch(a) -> int:
         ca = certs.to_pem(certs.read_der(_add_cert(a.ca).path)) if a.ca else intercept.ca_pem()
         assets.ensure_scripts()
         config = intercept.write_config(ca, host, port, run_dir)
-        out = patch.gadget(apks, t.package, config.read_text(), run_dir / "gadget")
+        out = patch.gadget(apks, t.package, config.read_text(), run_dir / "gadget", hide_proxy=a.hide_proxy)
     else:
         out = patch.apk_mitm(original, run_dir / "apk-mitm")
     dest = Path(a.out or Path.cwd())
@@ -889,6 +918,12 @@ def build_parser() -> argparse.ArgumentParser:
         action="store_true",
         help="without Frida, use the device-wide proxy setting instead of redirecting just the app with iptables",
     )
+    r.add_argument(
+        "--hide-proxy",
+        action="store_true",
+        help="with Frida (hooks, gadget), don't tell the app about the proxy: its connections are still redirected "
+        "underneath, so apps that refuse to run behind a proxy don't see one",
+    )
     r.set_defaults(fn=cmd_run)
     pl = sub.add_parser("pull", help="pull an installed app (every split) off a phone into one .apks")
     pl.add_argument("app", help="package name, or part of one to search for")
@@ -919,6 +954,12 @@ def build_parser() -> argparse.ArgumentParser:
         help="without Frida, use the device-wide proxy setting instead of redirecting just the app with iptables",
     )
     ph.add_argument(
+        "--hide-proxy",
+        action="store_true",
+        help="with Frida (hooks, gadget), don't tell the app about the proxy: its connections are still redirected "
+        "underneath, so apps that refuse to run behind a proxy don't see one",
+    )
+    ph.add_argument(
         "--no-hide-root", action="store_true", help="don't put the app on Magisk's DenyList (root stays visible to it)"
     )
     ph.add_argument("--cleanup", action="store_true", help="take frida-server, the CA and the proxy off the phone")
@@ -931,6 +972,9 @@ def build_parser() -> argparse.ArgumentParser:
         "app", nargs="+", help=".apk, a bundle (.apks / .xapk / .zip), a folder of split APKs, or the split .apk files"
     )
     pa.add_argument("--method", choices=["gadget", "apk-mitm"], default="gadget")
+    pa.add_argument(
+        "--hide-proxy", action="store_true", help="gadget: don't tell the app about the proxy (see `run --help`)"
+    )
     pa.add_argument(
         "--proxy", metavar="HOST:PORT", help="where the gadget's hooks send traffic (default 127.0.0.1:8080)"
     )

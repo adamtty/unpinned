@@ -816,3 +816,25 @@ def test_banner_respects_no_color_and_narrow_terminals(monkeypatch, capsys):
     monkeypatch.setattr(banner.shutil, "get_terminal_size", lambda: os.terminal_size((40, 40)))
     banner.show()
     assert capsys.readouterr().out == ""
+
+
+def test_hide_proxy_leaves_out_only_the_proxy_override(tmp_path):
+    from unpinned import intercept
+
+    shown, hidden = assets.hook_scripts(), assets.hook_scripts(hide_proxy=True)
+    assert assets.PROXY_OVERRIDE in shown and assets.PROXY_OVERRIDE not in hidden
+    assert set(shown) - set(hidden) == {assets.PROXY_OVERRIDE}
+    assert "native-connect-hook.js" in hidden  # the sockets are still redirected to the proxy
+    cmd = intercept.frida_command("emulator-5554", "a.b", tmp_path / "config.js", hide_proxy=True)
+    assert not any(c.endswith("android-proxy-override.js") for c in cmd)
+
+
+def test_watcher_spots_proxy_refusals():
+    from unpinned import watch
+
+    seen = watch.Outcome(True, "it's showing: This app cannot be used while a proxy is enabled.", refused=True)
+    assert watch.REFUSAL_RE.search(seen.reason) and seen.proxy
+    vpn = "it's showing: Please turn off your VPN"
+    assert watch.REFUSAL_RE.search(vpn) and not watch.Outcome(True, vpn, refused=True).proxy
+    assert not watch.Outcome(True, "it's showing: Root detected", refused=True).proxy
+    assert not watch.Outcome(True).proxy

@@ -1,6 +1,6 @@
 """After launch: did the app come up, or did it refuse? It refused if its process died within the watch window (Android
 records why: crash, exit, killed by a signal) or its own window shows text about root, tampering, Frida, an emulator,
-integrity or a debugger, or Google Play's licence-check dialogs."""
+integrity, a debugger, a proxy or VPN, or Google Play's licence-check dialogs."""
 
 from __future__ import annotations
 
@@ -14,10 +14,14 @@ REFUSAL_RE = re.compile(
     r"\b(root(ed)?\b|jail\s?broken|jailbreak|superuser|magisk|\bsu\b binary|tamper\w*|emulat\w+|integrity|"
     r"insecure device|unsafe device|security (risk|threat|issue)|frida|hook\w*|debugg\w+|modified|"
     r"not (supported|allowed) on this device|compromised|"
+    r"proxy|vpn|"
     # Google Play's automatic protection: no Play Store to ask, or not installed from Play
     r"check that google play is enabled|get this app from (google )?play)",
     re.I,
 )
+
+
+PROXY_RE = re.compile(r"\bprox(y|ies)\b", re.I)  # a VPN refusal is about the device: hiding the proxy can't help
 
 
 @dataclass
@@ -29,6 +33,11 @@ class Outcome:
     @property
     def ok(self) -> bool:
         return self.alive and not self.refused
+
+    @property
+    def proxy(self) -> bool:
+        """It refused because it saw a proxy ("This app cannot be used while a proxy is enabled")."""
+        return self.refused and bool(PROXY_RE.search(self.reason))
 
 
 def screen_text(serial: str, package: str) -> list[str]:

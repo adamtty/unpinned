@@ -143,13 +143,14 @@ def write_config(ca: str, host: str, port: int, run_dir: Path) -> Path:
     return out
 
 
-def frida_command(serial: str, package: str, config: Path, extra: list[str] | None = None) -> list[str]:
+def frida_command(
+    serial: str, package: str, config: Path, extra: list[str] | None = None, hide_proxy: bool = False
+) -> list[str]:
     """frida spawns the app with config.js first, then every hook, and leaves you in its REPL."""
     d = assets.scripts_dir()
     cmd = [env.frida_bin(), "-D", serial, "-l", str(config)]
-    for rel in assets.SCRIPTS:
-        if rel != "config.js":
-            cmd += ["-l", str(d / rel)]
+    for rel in assets.hook_scripts(hide_proxy):
+        cmd += ["-l", str(d / rel)]
     for script in extra or []:
         cmd += ["-l", str(script)]
     return [*cmd, "-f", package]
