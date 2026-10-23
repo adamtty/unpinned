@@ -60,6 +60,62 @@ def test_a_bundle_member_that_isnt_an_apk_is_refused(tmp_path):
         apk.load(b, tmp_path / "w")
 
 
+def test_a_single_apk_or_bundle_is_gathered_as_it_is(tmp_path):
+    a = _apk(tmp_path / "app.apk")
+    assert apk.gather([a], tmp_path / "w") == a
+
+
+def test_a_folder_of_splits_becomes_one_bundle(tmp_path):
+    d = tmp_path / "Easy Way"
+    d.mkdir()
+    for n in ("split_config.en.apk", "base.apk"):
+        _apk(d / n)
+    (d / "._base.apk").write_bytes(b"\x00\x05\x16\x07")  # macOS metadata on non-Apple drives
+    (d / "notes.txt").write_text("not an app")
+    b = apk.gather([d], tmp_path / "w")
+    assert b == tmp_path / "w" / "Easy_Way.apks"
+    with zipfile.ZipFile(b) as z:
+        assert sorted(z.namelist()) == ["base.apk", "split_config.en.apk"]
+        assert {i.compress_type for i in z.infolist()} == {zipfile.ZIP_STORED}
+    assert [p.name for p in apk.load(b, tmp_path / "u")] == ["base.apk", "split_config.en.apk"]
+
+
+def test_several_apk_files_become_one_bundle(tmp_path):
+    files = [_apk(tmp_path / n) for n in ("base.apk", "split_config.arm64_v8a.apk")]
+    b = apk.gather(files, tmp_path / "w")
+    assert [p.name for p in apk.load(b, tmp_path / "u")] == ["base.apk", "split_config.arm64_v8a.apk"]
+
+
+def test_gather_refuses_what_isnt_a_set_of_splits(tmp_path):
+    base = _apk(tmp_path / "base.apk")
+    empty = tmp_path / "empty"
+    empty.mkdir()
+    bundle = _zip(tmp_path / "app.apks", {"base.apk": base.read_bytes()})
+    (tmp_path / "x").mkdir()
+    dup = _apk(tmp_path / "x" / "base.apk")
+    cases = {
+        "no .apk files": [empty],
+        "not both": [base, empty],
+        "not a file": [base, tmp_path / "missing.apk"],
+        "repeated": [base, dup],
+        "not a bundle of them": [base, bundle.rename(tmp_path / "bundle.apk")],
+        "not a zip": [base, (tmp_path / "text.apk").resolve()],
+    }
+    (tmp_path / "text.apk").write_text("hello")
+    for why, paths in cases.items():
+        with pytest.raises(apk.ApkError, match=why):
+            apk.gather(paths, tmp_path / "w")
+
+
+def test_cli_takes_several_files_or_one_package_from_the_phone():
+    from unpinned import cli
+
+    p = cli.build_parser()
+    assert p.parse_args(["triage", "a/base.apk", "a/split.apk"]).app == ["a/base.apk", "a/split.apk"]
+    assert p.parse_args(["run", "folder"]).app == ["folder"]
+    assert p.parse_args(["patch", "x.apks"]).app == ["x.apks"]
+
+
 @pytest.mark.parametrize("name", ["../evil.apk", "a b.apk", "dup.apk"])
 def test_bundle_names_cannot_escape_or_collide(tmp_path, name):
     ok = _apk(tmp_path / "ok.apk").read_bytes()

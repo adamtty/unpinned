@@ -341,7 +341,16 @@ uv run unpinned run --from-phone spotify
 ### What it accepts
 
 - a single `.apk`
-- a bundle of splits: `.apks` (bundletool), `.xapk`, or a `.zip` of APKs
+- a bundle of splits: `.apks` (bundletool), `.xapk`, or a `.zip` of APKs (Finder's "Compress" is fine: the
+  `__MACOSX` files it adds are skipped)
+- **the split APKs themselves**, as they come off a phone or out of a download:
+  - a folder of them: `unpinned run ~/Downloads/easyway-apk`
+  - or the files: `unpinned run ~/Downloads/easyway-apk/*.apk`
+
+  unpinned packs them into one `.apks` in the run's work folder (as they are, not recompressed), so from there it's
+  the same as a bundle: installed together, patched together and re-signed with one key. Only the `.apk` files in
+  the folder count (`._*` metadata files from non-Apple drives are skipped). Each must be a plain APK, not a bundle,
+  and they must all be the same app's (Android refuses to install a mixed set).
 - with `--from-phone`, an app installed on your phone: a package name or part of one to search for
   ([section 9](#9-using-your-phone))
 
@@ -596,9 +605,16 @@ on 127.0.0.1:8080.
 
 **Just reading an app.** `triage app.apk --json report.json`.
 
+**An app that came as loose split APKs** (`base.apk`, `split_config.arm64_v8a.apk`, …). Point at the folder:
+`run ~/Downloads/the-app/`. No need to zip them first.
+
 ## 14. Command reference
 
 All commands take `--api VERSION` before the command (default `36.1`, or `$UNPINNED_API`) to pick the emulator.
+
+`APP` for `triage`, `run` and `patch` is an `.apk`, a bundle (`.apks`, `.xapk`, `.zip`), a folder of split APKs, or
+several `.apk` files ([what it accepts](#what-it-accepts)). With `--from-phone`, and for `phone` and `pull`, it's a
+package name or part of one.
 
 | Command | What it does | Options |
 |---|---|---|
@@ -758,4 +774,4 @@ against GitHub's published SHA-256. On devices where it won't run, it uses 17.5.
 | **Magisk / Zygisk / DenyList** | Magisk is the common Android root tool; Zygisk runs its code inside apps; the DenyList is Magisk's per-app list of apps to hide from |
 | **Snapshot** | a saved state of the emulator that it can return to in seconds |
 | **adb reverse** | makes a port on the device lead to a port on your Mac, over the adb connection |
-| **Split APKs / bundle** | modern apps are several APKs (base, per-ABI, per-density, per-language); a bundle (`.apks`, `.xapk`) holds them together |
+| **Split APKs / bundle** | modern apps are several APKs (base, per-ABI, per-density, per-language); a bundle (`.apks`, `.xapk`) holds them together, and unpinned also takes them loose (a folder, or the files) |

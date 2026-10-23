@@ -1,5 +1,6 @@
-"""Reading what was dropped in: a single .apk, or a bundle of splits (.apks from bundletool, .xapk, or a plain .zip
-of APKs), plus a quick static triage: package, versions, native ABIs, the app framework and hints of a protector."""
+"""Reading what was dropped in: a single .apk, a bundle of splits (.apks from bundletool, .xapk, or a plain .zip
+of APKs), or the split APKs themselves (a folder of them, or several files), plus a quick static triage: package,
+versions, native ABIs, the app framework and hints of a protector."""
 
 from __future__ import annotations
 
@@ -111,6 +112,59 @@ def _mac(member: zipfile.ZipInfo) -> bool:
     """macOS metadata that Finder's "Compress" adds: __MACOSX/…/._name.apk, a few bytes, not an APK."""
     name = member.filename.replace("\\", "/")
     return name.startswith("__MACOSX/") or name.rsplit("/", 1)[-1].startswith("._")
+
+
+def gather(paths: list[Path], workdir: Path) -> Path:
+    """What was dropped in, as one file. A single APK or bundle is used as it is. A folder of split APKs, or several
+    APK files, is packed into one bundle in workdir (stored, not recompressed), so the rest of unpinned (installing,
+    patching, apk-mitm) sees a bundle either way. Every file must be a plain APK, with the same name, count and size
+    limits as a bundle's."""
+    paths = [Path(p) for p in paths]
+    if not paths:
+        raise ApkError("no app given")
+    if len(paths) == 1 and not paths[0].is_dir():
+        return paths[0]
+    if len(paths) == 1:
+        files = sorted(
+            p
+            for p in paths[0].iterdir()
+            if p.suffix.lower() == ".apk" and not p.name.startswith("._") and p.is_file()  # ._*: macOS metadata
+        )
+        if not files:
+            raise ApkError(f"no .apk files in {paths[0]}")
+        name = paths[0].resolve().name
+    else:
+        if any(p.is_dir() for p in paths):
+            raise ApkError("give one folder, or several .apk files, not both")
+        files, name = paths, ""
+    if len(files) > MAX_APKS:
+        raise ApkError(f"more than {MAX_APKS} APKs")
+    seen: set[str] = set()
+    total = 0
+    for f in files:
+        if not f.is_file():
+            raise ApkError(f"not a file: {f}")
+        if not re.fullmatch(r"[A-Za-z0-9._-]+\.apk", f.name, flags=re.I) or f.name in seen:
+            raise ApkError(f"unexpected or repeated APK name: {f.name!r}")
+        seen.add(f.name)
+        size = f.stat().st_size
+        if size > MAX_APK_BYTES:
+            raise ApkError(f"{f.name} is larger than {MAX_APK_BYTES // (1024**3)} GB")
+        total += size
+        if total > MAX_BUNDLE_BYTES:
+            raise ApkError(f"the APKs add up to more than {MAX_BUNDLE_BYTES // (1024**3)} GB")
+        if not zipfile.is_zipfile(f):
+            raise ApkError(f"{f.name} isn't an APK (not a zip)")
+        with zipfile.ZipFile(f) as z:
+            if "AndroidManifest.xml" not in z.namelist():
+                raise ApkError(f"{f.name} has no AndroidManifest.xml: give the split APKs, not a bundle of them")
+    stem = re.sub(r"[^A-Za-z0-9._-]+", "_", name).strip("._")[:60] or "app"
+    workdir.mkdir(parents=True, exist_ok=True)
+    out = workdir / f"{stem}.apks"
+    with zipfile.ZipFile(out, "x", zipfile.ZIP_STORED) as z:
+        for f in files:
+            z.write(f, arcname=f.name)
+    return out
 
 
 def _members(apks: list[Path]) -> list[str]:

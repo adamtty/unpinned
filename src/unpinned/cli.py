@@ -243,7 +243,7 @@ def recommend(r: analyze.Report) -> str:
 
 def cmd_triage(a) -> int:
     with tempfile.TemporaryDirectory(prefix="unpinned-") as tmp:
-        r = analyze.analyze(apk.load(Path(a.app), Path(tmp)))
+        r = analyze.analyze(apk.load(apk.gather(a.app, Path(tmp) / "input"), Path(tmp) / "apks"))
         show_report.show_secrets = a.show_secrets
         show_report(r)
         if a.json:
@@ -565,7 +565,12 @@ def cmd_run(a) -> int:
         warn(f"no clean snapshot yet: run `{device.setup_command(a.api)}` first")
         return 1
     run_dir = Path(tempfile.mkdtemp(prefix="run-", dir=env.home()))
-    original = _from_phone(a, run_dir) if a.from_phone else Path(a.app)
+    if a.from_phone:
+        if len(a.app) != 1:
+            warn("with --from-phone, give one package name or search")
+            return 1
+        a.app = a.app[0]
+    original = _from_phone(a, run_dir) if a.from_phone else apk.gather(a.app, run_dir / "input")
     apks = apk.load(original, run_dir / "apks")
     r = analyze.analyze(apks)
     package = r.triage.package
@@ -748,7 +753,8 @@ def cmd_stop(a) -> int:
 def cmd_patch(a) -> int:
     """Patch without running: writes the patched APK(s) for use elsewhere (a real device, another emulator)."""
     run_dir = Path(tempfile.mkdtemp(prefix="patch-", dir=env.home()))
-    apks = apk.load(Path(a.app), run_dir / "apks")
+    original = apk.gather(a.app, run_dir / "input")
+    apks = apk.load(original, run_dir / "apks")
     t = apk.triage(apks)
     if a.method == "gadget":
         host, port = certs.parse_proxy(a.proxy) if a.proxy else ("127.0.0.1", env.PROXY_PORT)
@@ -757,7 +763,7 @@ def cmd_patch(a) -> int:
         config = intercept.write_config(ca, host, port, run_dir)
         out = patch.gadget(apks, t.package, config.read_text(), run_dir / "gadget")
     else:
-        out = patch.apk_mitm(Path(a.app), run_dir / "apk-mitm")
+        out = patch.apk_mitm(original, run_dir / "apk-mitm")
     dest = Path(a.out or Path.cwd())
     dest.mkdir(parents=True, exist_ok=True)
     for p in out:
@@ -781,13 +787,20 @@ def build_parser() -> argparse.ArgumentParser:
     s.add_argument("--headless", action="store_true", help="no emulator window")
     s.set_defaults(fn=cmd_setup)
     t = sub.add_parser("triage", help="pinning, root/Frida checks, manifest, secrets and endpoints (no device)")
-    t.add_argument("app")
+    t.add_argument(
+        "app", nargs="+", help=".apk, a bundle (.apks / .xapk / .zip), a folder of split APKs, or the split .apk files"
+    )
     t.add_argument("--show-secrets", action="store_true", help="print secrets in full (masked by default)")
     t.add_argument("--json", help="write the whole triage to this JSON file")
     t.add_argument("--endpoints", action="store_true", help="list every URL found")
     t.set_defaults(fn=cmd_triage)
     r = sub.add_parser("run", help="triage, choose a strategy, run it, and patch the app if it refuses a rooted device")
-    r.add_argument("app", help=".apk or a bundle (.apks / .xapk / .zip); with --from-phone, a package name or search")
+    r.add_argument(
+        "app",
+        nargs="+",
+        help=".apk, a bundle (.apks / .xapk / .zip), a folder of split APKs, or the split .apk files; "
+        "with --from-phone, a package name or search",
+    )
     r.add_argument("--from-phone", action="store_true", help="pull the app off a connected phone first")
     r.add_argument("--device", help="the phone's adb serial (default: the only phone connected)")
     r.add_argument("--strategy", choices=["auto", *STRATEGIES], default="auto", help="skip the question")
@@ -851,7 +864,9 @@ def build_parser() -> argparse.ArgumentParser:
     sub.add_parser("reset", help="put the running device back to the clean snapshot").set_defaults(fn=cmd_reset)
     sub.add_parser("stop", help="stop the emulator, the hooks, mitmweb and scrcpy").set_defaults(fn=cmd_stop)
     pa = sub.add_parser("patch", help="write a patched APK without running it")
-    pa.add_argument("app")
+    pa.add_argument(
+        "app", nargs="+", help=".apk, a bundle (.apks / .xapk / .zip), a folder of split APKs, or the split .apk files"
+    )
     pa.add_argument("--method", choices=["gadget", "apk-mitm"], default="gadget")
     pa.add_argument(
         "--proxy", metavar="HOST:PORT", help="where the gadget's hooks send traffic (default 127.0.0.1:8080)"
