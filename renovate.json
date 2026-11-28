@@ -1,23 +1,4 @@
 {
   "$schema": "https://docs.renovatebot.com/renovate-schema.json",
-  "extends": [
-    "config:recommended",
-    "helpers:pinGitHubActionDigests",
-    "customManagers:githubActionsVersions",
-    ":semanticCommitsDisabled"
-  ],
-  "labels": ["dependencies"],
-  "minimumReleaseAge": "3 days",
-  "internalChecksFilter": "strict",
-  "vulnerabilityAlerts": {
-    "labels": ["security"],
-    "minimumReleaseAge": null
-  },
-  "packageRules": [
-    {
-      "description": "Group action and tool bumps into one PR",
-      "matchManagers": ["github-actions", "custom.regex"],
-      "groupName": "CI dependencies"
-    }
-  ]
+  "extends": ["github>adamtty/renovate-config"]
 }
