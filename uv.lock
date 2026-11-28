@@ -34,7 +34,7 @@ wheels = [
 
 [[package]]
 name = "frida-tools"
-version = "14.11.0"
+version = "14.13.2"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "colorama" },
@@ -43,7 +43,10 @@ dependencies = [
     { name = "pygments" },
     { name = "websockets" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/b0/32/74291d04038ead2a361c7464e707ef935cb75a1011ee5d1e220c2849d39e/frida_tools-14.11.0.tar.gz", hash = "sha256:b8c772e59502be43b76df9feccadd5d342b5ca325066dd0c2384e63fa88da921", size = 4690429, upload-time = "2026-10-03T07:42:44.812Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/95/05/f5457f674d31c4ce9555b8920f369d30c0a94f951fe0eec5c247e286b8b8/frida_tools-14.13.2.tar.gz", hash = "sha256:11545870e4439acf0a96e178f7aeb391cd7a88301834de1688f109961952cac8", size = 5653874, upload-time = "2026-11-16T21:56:00.218Z" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/8d/06/bec2d4c51fbe3c2770f2fb68411368815fa0e8bb30173759d189bb6a0c36/frida_tools-14.13.2-py3-none-any.whl", hash = "sha256:98c43665a08702c2d100bd942ab0356602481f99767fe9fa398aa423f5814db6", size = 4658315, upload-time = "2026-11-16T21:55:58.467Z" },
+]
 
 [[package]]
 name = "iniconfig"
@@ -152,7 +155,7 @@ dev = [
 [package.metadata]
 requires-dist = [
     { name = "frida", specifier = "==17.27.5" },
-    { name = "frida-tools", specifier = "==14.11.0" },
+    { name = "frida-tools", specifier = "==14.13.2" },
 ]
 
 [package.metadata.requires-dev]
